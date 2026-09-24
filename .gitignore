@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# PyInstaller (build.bat)
+build/
+dist/
+
+# Persönliche Zugangsdaten (Google Drive) – nie einchecken
+credentials.json
+token.json
+
+# Lokale Laufzeitdaten neben main.py bzw. der .exe
+manga_library.db
+config.json
+LOG/
