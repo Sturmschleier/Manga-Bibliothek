@@ -33,9 +33,14 @@ gesamten Bestand dauerhaft in `manga_library.db`.
 - **VÖ +1:** Beendet = helles Grün, TBA = helles Orange, Gestoppt = helles
   Rot, NA = Pink (wird automatisch eingetragen, siehe unten).
 - **Komplett / Beendet:** Ja = dasselbe Grün, Nein = dasselbe Rot.
-- **Verlag:** jeder Verlag bekommt automatisch eine eigene, stabile
-  Pastellfarbe (aus dem Namen abgeleitet) – neue Verlage erhalten ohne
-  weiteres Zutun eine neue Farbe.
+- **Verlag:** jeder Verlag bekommt automatisch eine eigene Pastellfarbe aus
+  einer festen, gut unterscheidbaren Palette (24 Farben) – keine zwei
+  vorhandenen Verlage teilen sich eine Farbe. Neue Verlage erhalten ohne
+  weiteres Zutun eine noch freie Farbe; bei mehr als 24 Verlagen müssen
+  sich Farben wiederholen. Da die Farben aus dem Namen abgeleitet werden,
+  bleiben sie im Normalfall stabil; beim Hinzufügen eines Verlags kann sich
+  aber die Farbe eines anderen Verlags ändern, wenn beide denselben
+  Palettenplatz beanspruchen.
 - **Zeilen:** jede zweite Zeile ist leicht hellgrau hinterlegt.
 
 Eine Legende dazu steht direkt unter der Werkzeugleiste im Programm.
@@ -425,10 +430,11 @@ mangalib/
 ## Automatisierte Tests
 
 Für die reinen Logik-Module (kein Qt/GUI-Code) gibt es eine pytest-Suite
-unter `tests/` – 61 Testfälle für `logic.py` (inkl. "Fortlaufend"- und
+unter `tests/` – 65 Testfälle für `logic.py` (inkl. "Fortlaufend"- und
 "Gelesen über Bände hinaus"-Sonderfälle), `sorting.py` (Datumserkennung),
 `isbn_lookup.py`-Hilfsfunktionen (ISBN-Bereinigung, Typ-/Bandnummer-
-Abgleich) und `import_csv._match_columns` (Kopfzeilen-Erkennung).
+Abgleich), `import_csv._match_columns` (Kopfzeilen-Erkennung) und die
+Verlagsfarben in `colors.py`.
 
 ```
 pip install -r requirements-dev.txt
