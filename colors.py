@@ -2,14 +2,13 @@
 colors.py
 Erzeugt die Farben für die Tabellenansicht:
 
-- Jeder Verlag bekommt automatisch eine eigene, stabile Farbe (per Hash aus
-  dem Namen abgeleitet) – neue Verlage bekommen ohne weiteres Zutun
-  automatisch eine neue, bisher ungenutzte Farbe aus dem Farbkreis.
+- Jeder Verlag bekommt automatisch eine eigene Farbe aus einer festen,
+  gut unterscheidbaren Palette – neue Verlage bekommen ohne weiteres Zutun
+  eine bisher ungenutzte Farbe (bis die Palette ausgeschöpft ist).
 - Die Spalte "VÖ +1" wird nach Status eingefärbt (Beendet/TBA/Gestoppt).
 - Jede zweite Zeile wird leicht grau hinterlegt (Zebra-Streifen).
 """
 
-import colorsys
 import hashlib
 
 # Helle, aber gut lesbare Statusfarben für die Spalte "VÖ +1"
@@ -42,19 +41,64 @@ def voe1_color(value: str):
     return VOE1_STATUS_COLORS.get(value.strip().lower())
 
 
-def verlag_color(verlag: str, saturation: float = 0.38, brightness: float = 0.95):
-    """
-    Leitet aus dem Verlagsnamen deterministisch eine helle Pastellfarbe ab.
-    Gleicher Name -> immer gleiche Farbe. Verschiedene Namen verteilen sich
-    automatisch über den gesamten Farbkreis, sodass neue Verlage automatisch
-    eine neue, gut unterscheidbare Farbe erhalten.
-    """
-    if not verlag:
-        return None
+# Feste Palette gut unterscheidbarer Pastellfarben für Verlage. Per
+# Farbabstand (CIE-Lab) so ausgewählt, dass je zwei Farben möglichst weit
+# auseinanderliegen und der dunkle Text lesbar bleibt; die Reihenfolge ist
+# absteigend nach "Unterscheidbarkeit", die ersten Einträge sind also die
+# kontrastreichsten.
+VERLAG_PALETTE = [
+    "#69FA69", "#E7B4FA", "#EDB664", "#69FAFA", "#B0DB7F", "#91C9FA",
+    "#69FAB6", "#FACBB4", "#EDED64", "#EDE9AB", "#9EDBBF", "#B6FA69",
+    "#B4ECFA", "#5CDB76", "#B4B9FA", "#5CDBB9", "#64D2ED", "#A6FA91",
+    "#E7ED8A", "#EDD264", "#B9DB5C", "#FAAD91", "#7FDB92", "#7EDB5C",
+]
+
+# Zuordnung Verlag (kleingeschrieben) -> Farbe, siehe set_verlag_universe()
+_verlag_colors = {}
+
+
+def _hash_slot(verlag: str) -> int:
     digest = hashlib.md5(verlag.strip().lower().encode("utf-8")).hexdigest()
-    hue = (int(digest, 16) % 360) / 360.0
-    r, g, b = colorsys.hsv_to_rgb(hue, saturation, brightness)
-    return "#{:02x}{:02x}{:02x}".format(int(r * 255), int(g * 255), int(b * 255))
+    return int(digest, 16) % len(VERLAG_PALETTE)
+
+
+def set_verlag_universe(verlage):
+    """
+    Weist allen aktuell vorkommenden Verlagen je eine eigene Palettenfarbe zu.
+
+    Jeder Verlag bewirbt sich zuerst um den aus seinem Namen abgeleiteten
+    Palettenplatz (dadurch bleibt die Farbe stabil, solange sich nichts
+    überschneidet); ist der Platz schon vergeben, rückt er auf den nächsten
+    freien vor. Es wird in alphabetischer Reihenfolge vergeben, das Ergebnis
+    hängt also nicht von der Anzeigereihenfolge ab. Erst bei mehr Verlagen
+    als Palettenfarben müssen Farben mehrfach vergeben werden.
+    """
+    names = sorted({v.strip().lower() for v in verlage if v and v.strip()})
+    size = len(VERLAG_PALETTE)
+    used = set()
+    mapping = {}
+    for name in names:
+        slot = _hash_slot(name)
+        if len(used) < size:
+            while slot in used:
+                slot = (slot + 1) % size
+            used.add(slot)
+        mapping[name] = VERLAG_PALETTE[slot]
+    _verlag_colors.clear()
+    _verlag_colors.update(mapping)
+
+
+def verlag_color(verlag: str):
+    """
+    Liefert die Farbe eines Verlags. Gleicher Name -> gleiche Farbe; sind
+    die vorkommenden Verlage per set_verlag_universe() bekannt, sind die
+    Farben paarweise verschieden. Unbekannte Namen erhalten die Farbe ihres
+    Hash-Platzes.
+    """
+    if not verlag or not verlag.strip():
+        return None
+    key = verlag.strip().lower()
+    return _verlag_colors.get(key) or VERLAG_PALETTE[_hash_slot(key)]
 
 
 def ja_nein_color(value: str):

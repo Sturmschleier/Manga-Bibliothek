@@ -791,6 +791,7 @@ class MangaLibraryApp(QMainWindow):
 
     def refresh(self):
         self._refresh_verlag_filter_options()
+        colors.set_verlag_universe(self._distinct_values("verlag"))
         self._update_stats()
         self._update_counts()
         self._update_releases()
