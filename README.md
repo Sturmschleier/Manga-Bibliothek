@@ -1,2 +1,459 @@
-# Manga-Bibliothek
-Bibliothek von Mangaas mit Besitz und gelesen. 
+# Manga & Light Novel Bibliothek
+
+Ein Desktop-Programm (Python + Qt/PySide6), das deine Manga-, Manhwa- und
+Light-Novel-Sammlung in einer lokalen Datenbank verwaltet – mit allen
+Spalten aus deiner bisherigen Liste, grafisch bearbeitbar, sortierbar,
+durchsuchbar und farbcodiert. Optional kann die Datenbank in Google Drive
+gesichert und von dort wieder geladen werden.
+
+Die Tabelle nutzt eine echte, virtualisierte Qt-Tabellenansicht: Es werden
+nur für die gerade sichtbaren Zeilen tatsächlich Zeichenkosten fällig,
+unabhängig davon, wie viele Titel die Sammlung insgesamt enthält. Das
+macht auch den Programmstart bei größeren Sammlungen spürbar schneller
+(frühere Versionen bauten noch für jede Zeile eigene Bedienelemente auf).
+
+## Wichtig: Zwischenspeicher statt Sofort-Speichern
+
+Alle Änderungen – neuer Eintrag, Bearbeiten, Löschen, die „+1“-Buttons,
+CSV-Import – wirken zunächst **nur im Arbeitsspeicher**, nicht in der
+Datenbankdatei. Erst ein Klick auf **„💾 Speichern“** schreibt den
+gesamten Bestand dauerhaft in `manga_library.db`.
+
+- Solange ungespeicherte Änderungen bestehen, zeigt der Fenstertitel ein
+  „ *“ und die Statuszeile unten „— ungespeicherte Änderungen“.
+- Beim Schließen des Fensters wird nachgefragt, ob gespeichert werden soll.
+- Vor einem Google-Drive-Upload wird ebenfalls zuerst nach dem Speichern
+  gefragt, da hochgeladen wird, was in der Datenbankdatei steht.
+- Ein Google-Drive-Download ersetzt die lokale Datenbank **und** den
+  Zwischenspeicher – nicht gespeicherte Änderungen gehen dabei verloren
+  (mit Warnung vorher).
+
+## Farbcodierung
+
+- **VÖ +1:** Beendet = helles Grün, TBA = helles Orange, Gestoppt = helles
+  Rot, NA = Pink (wird automatisch eingetragen, siehe unten).
+- **Komplett / Beendet:** Ja = dasselbe Grün, Nein = dasselbe Rot.
+- **Verlag:** jeder Verlag bekommt automatisch eine eigene, stabile
+  Pastellfarbe (aus dem Namen abgeleitet) – neue Verlage erhalten ohne
+  weiteres Zutun eine neue Farbe.
+- **Zeilen:** jede zweite Zeile ist leicht hellgrau hinterlegt.
+
+Eine Legende dazu steht direkt unter der Werkzeugleiste im Programm.
+
+## „+1“-Buttons
+
+- **Bände (bis):** erhöht die Zahl um 1 und verschiebt gleichzeitig die
+  VÖ-Termine eine Position nach vorn (VÖ+2 → VÖ+1, VÖ+3 → VÖ+2, usw., da
+  der bisherige VÖ+1-Termin durch den neuen Band eingelöst wurde). Sind
+  danach keine Termine mehr vorhanden, wird „NA“ (pink) in VÖ+1
+  eingetragen. **Ausnahme:** Steht in VÖ+1 der Text „Fortlaufend“ (Reihe
+  ohne festen, bandweise weiterrückenden Zeitplan), wird nichts
+  verschoben – VÖ+1 bleibt auf „Fortlaufend“ stehen, VÖ+2 … VÖ+5 bleiben
+  unangetastet.
+- **Gelesen bis:** erhöht nur dieses eine Feld um 1. Lässt sich nicht über
+  „Bände (bis)“ hinaus erhöhen – man kann nicht mehr Bände gelesen haben,
+  als man besitzt; ein Hinweis erscheint stattdessen, ohne den Wert zu
+  ändern.
+
+Beide Aktionen landen wie jede andere Änderung zunächst im Zwischenspeicher.
+
+## ISBN-Abgleich & Bestellliste
+
+Über den Button **„🔍 ISBN-Abgleich / Bestellliste“** öffnet sich ein
+Fenster mit drei Auswahlmöglichkeiten, welche Titel geprüft werden sollen:
+
+- **Nach Monat/Jahr (VÖ +1):** alle Titel, deren VÖ +1 im gewählten Monat
+  liegt (wie bisher, mit Monat/Jahr-Eingabefeldern).
+- **Alle Titel mit VÖ +1 = „TBA“**
+- **Alle Titel mit VÖ +1 = „NA“**
+
+Dazu die Option **„Vorhandene ISBNs erneut prüfen (überschreiben)“**
+(standardmäßig deaktiviert): Titel, für die es bereits einen
+ISBN-Cache-Eintrag für den aktuellen Band-Stand gibt, werden normalerweise
+übersprungen, um die DNB nicht unnötig erneut abzufragen. Diese Option
+erzwingt eine frische Suche auch für diese Titel und überschreibt den
+Cache-Eintrag – sinnvoll z. B., wenn ein früherer Treffer falsch war
+(etwa durch eine seitdem verbesserte Zuordnungslogik) oder sich bei der
+DNB etwas geändert haben könnte.
+
+Nach dem Start:
+
+1. Für die ausgewählten Titel wird die ISBN des nächsten Bandes
+   (`Bände (bis) + 1`) bei der Deutschen Nationalbibliothek (DNB) gesucht
+   – eingeschränkt auf Bücher, die im **aktuellen Kalenderjahr oder dem
+   Folgejahr** erschienen sind (automatisch anhand des Systemdatums
+   ermittelt, kein fester Jahreswert) – Bandnummern werden dabei sowohl
+   mit als auch ohne führende Null erkannt (z. B. Band 7 als „7“ oder als
+   „07“). Ist ein Verlag hinterlegt, wird zuerst direkt danach
+   eingeschränkt gesucht (die DNB liefert pro Anfrage maximal 20 Treffer –
+   bei umfangreichen/gleichnamigen Reihen kann der gesuchte Band sonst
+   außerhalb dieser ersten 20 liegen); findet das nichts, folgt
+   automatisch ein Fallback ohne Verlagseinschränkung. Manche Reihen
+   (z. B. Konosuba!) erscheinen sowohl als Manga als auch als Light Novel,
+   teils sogar beim selben Verlag – Verlag allein reicht dann nicht zur
+   Unterscheidung. Deshalb wird zusätzlich anhand des Feldes „Typ“ des
+   Eintrags geprüft: Bei „Light Novel“ muss der DNB-Titel den Begriff
+   „Light Novel“ explizit enthalten (üblich bei deutschen
+   Light-Novel-Ausgaben), bei „Manga“/„Manhwa“ wird ein Treffer
+   ausgeschlossen, dessen Titel „Light Novel“ enthält.
+2. Gefundene ISBNs werden in einer eigenen Tabelle `isbn_cache`
+   gespeichert (Schlüssel: Titel + der Band-Stand „Bände (bis)“, für den
+   gesucht wurde) und auf den in der Konfiguration hinterlegten
+   Online-Buchhändler verlinkt (Standard: Konold,
+   `isbn_shop_name`/`isbn_shop_url_template` in `config.json` – siehe
+   Abschnitt „Zentrale Konfiguration“). Anders als in einer früheren
+   Version übersteht die ISBN dadurch ein normales „💾 Speichern“ – sie
+   bezieht sich aber weiterhin nur auf genau diesen Band-Stand: Ein
+   „+1“-Klick auf „Bände (bis)“ lässt sie automatisch aus der
+   Bestellliste verschwinden (der Cache-Eintrag „passt“ dann nicht mehr),
+   statt eine veraltete ISBN für den falschen Band weiterzuverwenden. Die
+   ISBN ist weiterhin nicht Teil des CSV-Exports.
+3. Wurde für einen Titel keine ISBN gefunden, führt die Bestellliste
+   stattdessen einen Fallback-Suchlink – standardmäßig eine Suche auf
+   **buchhandel.de** (gedruckte Bücher, ab dem aktuellen Kalenderjahr,
+   nach Erscheinungsdatum sortiert). Alternativ lässt sich über
+   `isbn_fallback_provider` in `config.json` auf **manga-passion.de**
+   umstellen.
+4. Ein **eigenes Ergebnisfenster** öffnet sich mit einer Zusammenfassung
+   (wie viele automatisch gefunden wurden, wie sicher der Treffer war) und
+   einer fertigen **Bestellliste** (Markdown-Tabelle mit direkten
+   Konold-Links), die sich per Knopfdruck in die Zwischenablage kopieren
+   lässt.
+
+Da der Abgleich direkt in der Datenbankdatei sucht und schreibt, fragt das
+Programm bei ungespeicherten Änderungen zuerst, ob gespeichert werden
+soll. Titel ohne automatischen Treffer werden im Ergebnisfenster rot
+hervorgehoben und mit einem Suchlink des konfigurierten Fallback-Anbieters
+(Standard: buchhandel.de, siehe `isbn_fallback_provider`) zur manuellen
+Prüfung aufgelistet – so sind sie auf einen Blick von den automatisch
+gefundenen Treffern zu unterscheiden. Alle Links im Ergebnisfenster
+(Konold- wie manga-passion.de-Links) sind anklickbar und öffnen sich
+direkt im Standardbrowser.
+
+Der Abgleich läuft im Hintergrund (die Oberfläche bleibt bedienbar) und
+kann je nach Anzahl der Titel im gewählten Monat ein bis zwei Minuten
+dauern (aus Rücksicht auf die abgefragten APIs wird zwischen den Anfragen
+kurz gewartet).
+
+Die DNB-Antworten werden über eine echte XML-Bibliothek
+(`xml.etree.ElementTree`, Python-Standardbibliothek) ausgewertet statt per
+regulärem Ausdruck – robuster gegenüber Formatierungsdetails wie
+Namespace-Präfixen, und liefert bei einer fehlerhaften/unerwarteten
+Antwort eine klare Fehlermeldung im Log statt lautlos nichts zu finden.
+
+### Log-Datei
+
+Jeder Abgleich schreibt zusätzlich eine vollständige Log-Datei in einen
+Ordner **`LOG`** neben der `.exe` (bzw. neben `main.py` im Quellcode-
+Betrieb). Der Dateiname enthält Datum und Uhrzeit, z. B.
+`LOG/isbn_abgleich_2026-09-04_14-32-05.log`.
+
+Darin steht für **jeden** durchsuchten Titel:
+- jede abgesetzte DNB-SRU-Anfrage (CQL-Query und vollständige URL) – bei
+  bekanntem Verlag also die verlagseingeschränkte Anfrage sowie ggf. die
+  Fallback-Anfrage ohne Verlag
+- die geprüften Bandvarianten (mit und ohne führende Null, z. B. „7“/„07“)
+- die Anzahl der gefundenen DNB-Records je Anfrage und wie viele davon zur
+  Bandnummer passten
+- das Ergebnis (gefundene ISBN inkl. Zuordnungssicherheit, oder „kein
+  Treffer“)
+
+Das ist besonders hilfreich, um bei nicht gefundenen Bänden nachzuvoll-
+ziehen, ob z. B. der Titel bei der DNB anders geschrieben ist oder die
+Bandnummer im Katalog fehlt. Der Pfad der jeweils erzeugten Log-Datei
+steht auch am Ende der Zusammenfassung im Ergebnisfenster.
+
+## Voraussetzungen
+
+- Python 3.9 oder neuer
+
+## Installation & Start (aus dem Quellcode)
+
+```bash
+cd mangalib
+pip install -r requirements.txt
+python main.py
+```
+
+(PySide6 wird für die Oberfläche selbst benötigt. Die Google-Bibliotheken
+werden nur für die Google-Drive-Anbindung benötigt, `requests` für den
+ISBN-Abgleich. Fehlen Letztere, funktioniert das Programm trotzdem – die
+jeweilige Funktion zeigt dann nur eine Fehlermeldung.)
+
+Beim ersten Start wird automatisch eine leere Datenbank
+`manga_library.db` im Programmordner angelegt.
+
+## Bestehende Liste importieren
+
+Deine mitgelieferte Datei `Manga - Besitz.csv` liegt bereits in diesem
+Ordner.
+
+- **In der Oberfläche:** Button „CSV importieren“ → Datei auswählen. Die
+  Einträge landen im Zwischenspeicher – **danach auf „💾 Speichern“
+  klicken**, damit sie dauerhaft übernommen werden.
+- **Über die Kommandozeile** (schreibt sofort in die Datenbank, ohne GUI):
+  `python import_csv.py "Manga - Besitz.csv"`
+
+Der Import überspringt Titel, die bereits vorhanden sind – ein mehrfacher
+Import erzeugt also keine Duplikate.
+
+Die Kopfzeile der CSV-Datei wird geprüft: Erkennt das Programm sowohl die
+Beschriftungen der ursprünglichen Liste als auch die des CSV-Exports
+(auch bei vertauschter Spaltenreihenfolge), werden die Spalten automatisch
+korrekt zugeordnet. Passt die Spaltenanzahl nicht zur erwarteten Anzahl,
+wird der Import mit einer klaren Fehlermeldung abgebrochen, statt
+möglicherweise falsche Daten in die falschen Felder zu schreiben. Lässt
+sich die Kopfzeile nicht eindeutig erkennen, wird der Import trotzdem mit
+der Standard-Reihenfolge versucht – mit einem Hinweis, das Ergebnis kurz
+zu prüfen. Eine „Rückstand“-Spalte in der Datei (egal an welcher
+Position) wird erkannt und komplett ignoriert, statt den Import deswegen
+abzulehnen – sie ist eine reine Anzeige-/Berechnungsspalte und nie Teil
+des gespeicherten Datenmodells.
+
+## Bestand als CSV exportieren
+
+Button **„CSV exportieren“** → Speicherort wählen. Exportiert wird der
+aktuelle Stand im Zwischenspeicher (also inkl. noch nicht gespeicherter
+Änderungen) mit allen regulären Spalten und sprechenden
+Spaltenüberschriften in der ersten Zeile – z.B. zur Weiterverwendung in
+Excel oder als Sicherungskopie außerhalb der Datenbank. Weder die ISBN
+(liegt in der separaten `isbn_cache`-Tabelle, siehe Abschnitt
+„ISBN-Abgleich“ oben) noch die Spalte „Rückstand“ (nur live berechnet,
+nie gespeichert) sind enthalten.
+
+## Bedienung
+
+- **+ Neuer Eintrag** – legt ein neues Werk mit allen Spalten an
+- **Doppelklick auf eine Zeile** (oder „Bearbeiten“) – öffnet das Formular
+- **Löschen** – entfernt den ausgewählten Eintrag (mit Rückfrage)
+- **Suche** – filtert live über alle Spalten
+- **Filter – Verlag / VÖ +1** – zwei Dropdowns unterhalb der Werkzeugleiste,
+  kombinierbar mit der Suche und miteinander. „VÖ +1“ bietet neben „Alle“
+  die Status Beendet/TBA/Gestoppt/NA sowie „Mit Datum“ (nur Einträge mit
+  einer echten, erkannten Terminangabe). „Filter zurücksetzen“ setzt beide
+  Dropdowns und die Suche auf einmal zurück.
+- **Titel-Spalte** – passt ihre Breite automatisch an den längsten
+  aktuell vorhandenen Titel an (über die gesamte Sammlung, nicht nur die
+  gefilterte Ansicht) – keine feste Breite, reagiert live auf neue,
+  geänderte oder gelöschte Titel.
+- **Klick auf eine Spaltenüberschrift** – sortiert danach (erster Klick
+  aufsteigend, erneuter Klick auf dieselbe Spalte kehrt zu absteigend um).
+  Ganz rechts steht die Spalte **„Rückstand“** (Bände (bis) − Gelesen bis,
+  nicht gespeichert, nur live berechnet) – aufsteigend sortiert (erster
+  Klick) stehen die Reihen mit dem kleinsten Leserückstand oben,
+  absteigend sortiert (zweiter Klick) die mit dem größten.
+- **Ziehen am rechten Rand einer Spaltenüberschrift** – passt die
+  Spaltenbreite an (native Qt-Funktion des Tabellenkopfs)
+- **↶ Rückgängig / ↷ Wiederholen** (auch Strg+Z / Strg+Umschalt+Z) – macht
+  die letzte Änderung (Anlegen, Bearbeiten, Löschen, „+1“, CSV-Import)
+  rückgängig bzw. wiederholt sie. Bezieht sich nur auf den Zwischenspeicher;
+  ein Google-Drive-Download oder ein abgeschlossener ISBN-Abgleich setzen
+  die Rückgängig-Historie zurück, da sie den Bestand direkt von außen
+  ersetzen.
+- **„Nach Bearbeitung zur Zeile springen“** – Schalter in der Werkzeugleiste
+  (Startwert kommt aus der Konfigurationsdatei, siehe unten). Da eine
+  Änderung (z. B. ein „+1“-Klick) den Eintrag durch die Neusortierung an
+  eine andere Position verschieben kann, springt die Ansicht dorthin
+  automatisch mit. Bei deaktiviertem Schalter bleibt die aktuelle
+  Scroll-Position stattdessen unverändert erhalten. Die Einstellung wird
+  bei jeder Änderung sofort dauerhaft gespeichert.
+- **💾 Speichern** – schreibt alle gepufferten Änderungen in die Datenbank
+- **⚙ Konfiguration** – öffnet die zentrale Konfigurationsdatei direkt zum
+  Bearbeiten (siehe eigener Abschnitt unten)
+
+Die Felder „Typ“, „Komplett“, „Beendet“ und „Verlag“ sind als Dropdown
+vorausgefüllt, lassen sich aber auch frei eintippen.
+
+Die VÖ+1-/Komplett-Beendet-Farblegende steht als dauerhafter Bereich am
+rechten Rand der Fußzeile/Statusleiste, unabhängig von den normalen
+Statusmeldungen (z. B. „Gespeichert“).
+
+## Seitenleiste
+
+Rechts neben der Tabelle steht eine Seitenleiste (standardmäßig 15 % der
+Fensterbreite, per Ziehen am Trenner frei verstellbar):
+
+- **Statistik** – Summe im Besitz, Summe gelesen, Differenz und
+  Gelesen-Anteil (bisher oberhalb der Tabelle, jetzt hier).
+- **Anzahl nach Verlag** – Liste aller aktuell vorkommenden Verlage mit
+  ihrer jeweiligen Titel-Anzahl, absteigend sortiert. Passt sich
+  automatisch an, sobald ein neuer Verlag auftaucht oder der letzte
+  Eintrag eines Verlags verschwindet.
+- **Anzahl nach Typ** – je Typ (Manga/Manhwa/Light Novel) die Bände-Bilanz
+  als drei Zahlen in der Reihenfolge **Gesamt** (Summe „Bände (bis)“),
+  **Gelesen** (Summe „Gelesen bis“) und **Offen** (Gesamt − Gelesen), z. B.
+  „Manga: 1207 · 500 · 707“ – die Reihenfolge steht einmalig als Kommentar
+  über der Liste. Absteigend nach Gesamt sortiert. Respektiert „Gestoppt:
+  keine Berechnung“ (siehe unten), falls aktiv.
+- **Erscheinungstermine** – Anzahl der Termine (Treffer über alle
+  VÖ-Spalten VÖ +1 … VÖ +5, nicht nur VÖ +1 – ein Titel mit zwei Terminen
+  im selben Zeitraum zählt also zweimal) im aktuellen, im nächsten und im
+  übernächsten Kalendermonat, als drei Zähler im selben Stil wie die
+  Statistik oben.
+- **Ausstehende Termine** – Anzahl der Termine, bei denen eine VÖ-Spalte
+  einen Termin **vor** dem aktuellen Kalendermonat zeigt (vermutlich
+  bereits erschienen, aber „Bände (bis)“ noch nicht per „+1“
+  nachgetragen).
+- **Live-Log** – siehe nächster Abschnitt.
+
+## Live-Log
+
+Jede Datenänderung (Anlegen, Bearbeiten, Löschen, die „+1“-Buttons,
+CSV-Import, Rückgängig/Wiederholen, Speichern) erscheint sofort als
+Zeile im Live-Log unten in der Seitenleiste – sitzungsbasiert, d. h. die
+Anzeige beginnt bei jedem Programmstart wieder leer.
+
+Zusätzlich wird jede Änderung dauerhaft in `LOG/aenderungen.log`
+protokolliert. Einträge, die älter als 6 Monate sind, werden beim
+nächsten Programmstart automatisch nach `LOG/aenderungen_archiv.log`
+verschoben (nicht gelöscht) – die laufende Datei bleibt dadurch
+überschaubar, die Historie bleibt trotzdem vollständig erhalten.
+
+## Zentrale Konfiguration
+
+Der Button **„⚙ Konfiguration“** steht jetzt ganz links in der zweiten
+Werkzeugzeile (zusammen mit „Nach Bearbeitung zur Zeile springen“ und der
+neuen Option „Gestoppt: keine Berechnung“, siehe unten). Er öffnet einen
+Editor für `config.json` (liegt neben der `.exe` bzw. neben `main.py`).
+Der rohe JSON-Inhalt ist direkt bearbeitbar, wird beim Speichern
+validiert und wirkt für die meisten Einstellungen sofort, ohne
+Neustart. Enthält u. a.:
+
+| Schlüssel | Bedeutung | Standardwert |
+|---|---|---|
+| `isbn_shop_name` | Anzeigename des Buchhändlers für gefundene ISBNs | `Konold` |
+| `isbn_shop_url_template` | Link-Vorlage, `{isbn}` wird ersetzt | Konold-Shop |
+| `isbn_fallback_provider` | Suche bei nicht gefundener ISBN: `buchhandel.de` oder `manga-passion` | `buchhandel.de` |
+| `follow_selection_after_edit` | Startwert von „Nach Bearbeitung zur Zeile springen“ | `true` |
+| `sidebar_width_fraction` | Anteil der Fensterbreite für die Seitenleiste – **wirkt erst beim nächsten Programmstart** (bewusst so: eine bereits von Hand am Trenner verschobene Breite soll nicht ungefragt überschrieben werden) | `0.15` |
+| `exclude_gestoppt_from_stats` | Startwert von „Gestoppt: keine Berechnung“ | `false` |
+| `colors_enabled` | Farbcodierung je Kategorie (de)aktivieren: `voe1`, `komplett_beendet`, `verlag` (jeweils `true`/`false`). **Nur über diese Datei einstellbar, keine eigene Oberfläche dafür.** Deaktivierte Kategorien zeigen stattdessen die normale Zebra-Streifung. | alle `true` |
+
+Die Datei lässt sich auch direkt in einem Texteditor bearbeiten (z. B.
+wenn das Programm gerade nicht läuft).
+
+### Gestoppt: keine Berechnung
+
+Checkbox neben „⚙ Konfiguration“ (Startwert kommt aus `config.json`,
+Änderungen werden sofort dauerhaft gespeichert): Ist sie aktiv, fließen
+Titel mit VÖ +1 = „Gestoppt“ nicht in die Statistik-Box (Summe im Besitz
+usw.) und nicht in die Gesamt/Gelesen/Offen-Bilanz je Typ in der
+Seitenleiste ein. Reine Anzahl-Auflistungen (Anzahl nach Verlag/Typ)
+bleiben davon unberührt.
+
+## Google Drive Anbindung einrichten
+
+1. Gehe zur [Google Cloud Console](https://console.cloud.google.com/) und
+   erstelle ein neues Projekt (oder nutze ein bestehendes).
+2. Unter **APIs & Dienste → Bibliothek** die **Google Drive API**
+   aktivieren.
+3. Unter **APIs & Dienste → OAuth-Zustimmungsbildschirm** einen Bildschirm
+   vom Typ „Extern“ anlegen (für den privaten Gebrauch reicht es, dich
+   selbst als Testnutzer einzutragen).
+4. Unter **APIs & Dienste → Zugangsdaten → Zugangsdaten erstellen →
+   OAuth-Client-ID** den Typ **Desktop-App** wählen.
+5. Die heruntergeladene JSON-Datei umbenennen in `credentials.json` und
+   neben `main.py` (bzw. neben die spätere `.exe`) legen.
+
+Beim ersten Klick auf „Zu Google Drive sichern“ öffnet sich ein
+Browserfenster zur Anmeldung. Danach wird ein Token in `token.json`
+gespeichert, sodass du dich nicht erneut anmelden musst.
+
+⚠️ **Wichtig:** `credentials.json` und `token.json` sind persönliche
+Zugangsdaten – nicht weitergeben.
+
+## Als eigenständige .exe bauen (Windows)
+
+Die Umwandlung in eine `.exe` muss **auf einem Windows-Rechner**
+durchgeführt werden (eine Windows-exe lässt sich nicht von Linux/macOS
+aus erzeugen). Mitgeliefert ist dafür `build.bat`.
+
+1. Python auf dem Windows-Rechner installieren, falls noch nicht
+   vorhanden (bei der Installation „Add python.exe to PATH“ ankreuzen).
+2. In diesem Ordner (`mangalib`) per Doppelklick `build.bat` ausführen,
+   oder in der Eingabeaufforderung:
+   ```powershell
+   cd mangalib
+   build.bat
+   ```
+3. Nach Abschluss liegt `dist\MangaLibrary.exe` bereit.
+4. `MangaLibrary.exe` in einen eigenen Ordner legen (z.B. Desktop) und
+   von dort starten. `manga_library.db`, `credentials.json` und
+   `token.json` legen sich automatisch **neben** die exe – die exe also
+   nicht isoliert verschieben oder von einem USB-Stick o.ä. starten, ohne
+   dass diese Begleitdateien mitkommen, sonst startet sie jedes Mal mit
+   einer leeren Datenbank bzw. verlangt erneut die Google-Anmeldung.
+
+`credentials.json` (falls Google-Drive-Sync gewünscht ist) danach manuell
+in denselben Ordner wie `MangaLibrary.exe` legen.
+
+Falls beim Start der exe eine Fehlermeldung zu fehlenden Google-Modulen
+erscheint: `build.bat` erneut ausführen – das Skript bindet die
+Google-Bibliotheken bereits vollständig ein (`--collect-all`), das ist
+der häufigste Stolperstein beim exe-Bau mit diesen Bibliotheken.
+
+## Projektstruktur
+
+```
+mangalib/
+├── main.py            Startpunkt (startet die Qt-Anwendung)
+├── gui/                Grafische Oberfläche (PySide6/Qt), aufgeteilt in:
+│   ├── __init__.py       Re-Export (from gui import MangaLibraryApp funktioniert weiterhin)
+│   ├── constants.py      Geteilte Konstanten/Hilfsfunktionen (kein Qt-Code)
+│   ├── table.py          MangaTableModel, CellDelegate (Tabellen-Darstellung)
+│   ├── dialogs.py        EntryDialog, ConfigDialog, IsbnLookupDialog
+│   ├── isbn_view.py       IsbnWorkerSignals, IsbnResultWindow
+│   └── main_window.py     MangaLibraryApp (Hauptfenster, Zwischenspeicher-Logik)
+├── models.py            Werk-Dataclass (formales Datenmodell, dict-kompatibel)
+├── config.py            Zentrale Konfiguration (config.json)
+├── changelog.py         Live-/dauerhaftes Änderungsprotokoll (6-Monats-Archivierung)
+├── database.py        SQLite-Zugriff (load_all / replace_all, PRAGMA-Schema-Version)
+├── logic.py            Reine Berechnung für die "+1"-Aktionen (puffertauglich)
+├── colors.py           Farbcodierung (VÖ+1, Komplett/Beendet, Verlag, Zebra)
+├── sorting.py           Datums-/zahlenbewusste Sortierschlüssel
+├── isbn_lookup.py       ISBN-Abgleich (DNB) & Bestellliste, eigene isbn_cache-Tabelle
+├── paths.py            Basisverzeichnis - funktioniert auch als gebündelte exe
+├── drive_sync.py        Google-Drive-Sicherung/-Wiederherstellung
+├── import_csv.py       CSV-Einlesen (liefert Daten für den Puffer)
+├── tests/               Automatisierte Tests (pytest) für die reinen Logik-Module
+├── build.bat            PyInstaller-Buildskript (Windows) für die exe
+├── requirements.txt    Python-Laufzeit-Abhängigkeiten
+├── requirements-dev.txt Zusätzlich für Tests: pytest
+└── Manga - Besitz.csv  Deine ursprüngliche Liste (zum Import)
+```
+
+## Automatisierte Tests
+
+Für die reinen Logik-Module (kein Qt/GUI-Code) gibt es eine pytest-Suite
+unter `tests/` – 61 Testfälle für `logic.py` (inkl. "Fortlaufend"- und
+"Gelesen über Bände hinaus"-Sonderfälle), `sorting.py` (Datumserkennung),
+`isbn_lookup.py`-Hilfsfunktionen (ISBN-Bereinigung, Typ-/Bandnummer-
+Abgleich) und `import_csv._match_columns` (Kopfzeilen-Erkennung).
+
+```
+pip install -r requirements-dev.txt
+pytest
+```
+
+## Formales Datenmodell (models.py)
+
+`Werk` ist eine dataclass mit denselben Feldern wie `database.COLUMN_NAMES`
+(dynamisch daraus erzeugt, keine zweite, unabhängig zu pflegende
+Feldliste). Sie ist bewusst dict-kompatibel (`get`/`[...]`/`update`/...),
+damit sie sich als Drop-in-Ersatz für die bisherigen, einfachen Dicts
+verwenden lässt. Der Speicher-Puffer selbst arbeitet aktuell weiterhin mit
+normalen Dicts – eine vollständige Umstellung darauf wäre ein separater,
+größerer Schritt mit entsprechend höherem Änderungsrisiko und wurde bewusst
+nicht in einem Zug miterledigt. `Werk` steht aber bereits einsatzbereit für
+neuen Code zur Verfügung.
+
+## Hinweis zum Wechsel von Tkinter zu Qt (PySide6)
+
+Die Oberfläche wurde von Tkinter auf Qt (PySide6) umgestellt, um eine
+echte virtualisierte Tabellenansicht zu bekommen (nur sichtbare Zeilen
+kosten Zeichenzeit, spürbar schnellerer Programmstart bei größeren
+Sammlungen). Die gesamte übrige Logik (Datenbank, Farben, Sortierung,
+ISBN-Abgleich, Google-Drive-Sync, CSV-Import/-Export) ist unverändert und
+komplett unabhängig vom GUI-Toolkit – nur das `gui/`-Paket und `main.py`
+wurden dafür neu geschrieben.
+
