@@ -193,7 +193,7 @@ Beim ersten Start wird automatisch eine leere Datenbank
 Deine mitgelieferte Datei `Manga - Besitz.csv` liegt bereits in diesem
 Ordner.
 
-- **In der Oberfläche:** Button „CSV importieren“ → Datei auswählen. Die
+- **In der Oberfläche:** Menü **Datei → CSV importieren …** → Datei auswählen. Die
   Einträge landen im Zwischenspeicher – **danach auf „💾 Speichern“
   klicken**, damit sie dauerhaft übernommen werden.
 - **Über die Kommandozeile** (schreibt sofort in die Datenbank, ohne GUI):
@@ -217,7 +217,7 @@ des gespeicherten Datenmodells.
 
 ## Bestand als CSV exportieren
 
-Button **„CSV exportieren“** → Speicherort wählen. Exportiert wird der
+Menü **Datei → CSV exportieren …** → Speicherort wählen. Exportiert wird der
 aktuelle Stand im Zwischenspeicher (also inkl. noch nicht gespeicherter
 Änderungen) mit allen regulären Spalten und sprechenden
 Spaltenüberschriften in der ersten Zeile – z.B. zur Weiterverwendung in
@@ -228,11 +228,16 @@ nie gespeichert) sind enthalten.
 
 ## Bedienung
 
-- **+ Neuer Eintrag** – legt ein neues Werk mit allen Spalten an
-- **Doppelklick auf eine Zeile** (oder „Bearbeiten“) – öffnet das Formular
-- **Löschen** – entfernt den ausgewählten Eintrag (mit Rückfrage)
-- **Suche** – filtert live über alle Spalten
-- **Filter – Verlag / VÖ +1** – zwei Dropdowns unterhalb der Werkzeugleiste,
+- **Menü „Datei“** – bündelt alle Verwaltungsfunktionen (keine eigenen
+  Buttons mehr): Neuer Eintrag (Strg+N), Bearbeiten, Löschen (mit
+  Rückfrage), CSV importieren / exportieren, Von Google Drive laden
+- **Menü „Konfigurieren“** – Farben (Untermenü), Konfiguration sowie die
+  Schalter „Nach Bearbeitung zur Zeile springen“ und „Gestoppt: keine
+  Berechnung“
+- **Doppelklick auf eine Zeile** (oder Datei → Bearbeiten) – öffnet das Formular
+- **Suche** – oberstes Element der rechten Seitenleiste, filtert live über
+  alle Spalten
+- **Filter – Verlag / VÖ +1** – zwei Dropdowns in der Werkzeugleiste (rechts neben „ISBN-Abgleich“),
   kombinierbar mit der Suche und miteinander. „VÖ +1“ bietet neben „Alle“
   die Status Beendet/TBA/Gestoppt/NA sowie „Mit Datum“ (nur Einträge mit
   einer echten, erkannten Terminangabe). „Filter zurücksetzen“ setzt beide
@@ -255,7 +260,7 @@ nie gespeichert) sind enthalten.
   ein Google-Drive-Download oder ein abgeschlossener ISBN-Abgleich setzen
   die Rückgängig-Historie zurück, da sie den Bestand direkt von außen
   ersetzen.
-- **„Nach Bearbeitung zur Zeile springen“** – Schalter in der Werkzeugleiste
+- **„Nach Bearbeitung zur Zeile springen“** – Schalter im Menü „Konfigurieren“
   (Startwert kommt aus der Konfigurationsdatei, siehe unten). Da eine
   Änderung (z. B. ein „+1“-Klick) den Eintrag durch die Neusortierung an
   eine andere Position verschieben kann, springt die Ansicht dorthin
@@ -263,7 +268,7 @@ nie gespeichert) sind enthalten.
   Scroll-Position stattdessen unverändert erhalten. Die Einstellung wird
   bei jeder Änderung sofort dauerhaft gespeichert.
 - **💾 Speichern** – schreibt alle gepufferten Änderungen in die Datenbank
-- **⚙ Konfiguration** – öffnet die zentrale Konfigurationsdatei direkt zum
+- **Konfigurieren → Konfiguration …** – öffnet die zentrale Konfigurationsdatei direkt zum
   Bearbeiten (siehe eigener Abschnitt unten)
 
 Die Felder „Typ“, „Komplett“, „Beendet“ und „Verlag“ sind als Dropdown
@@ -316,9 +321,9 @@ verschoben (nicht gelöscht) – die laufende Datei bleibt dadurch
 
 ## Zentrale Konfiguration
 
-Der Button **„⚙ Konfiguration“** steht jetzt ganz links in der zweiten
-Werkzeugzeile (zusammen mit „Nach Bearbeitung zur Zeile springen“ und der
-neuen Option „Gestoppt: keine Berechnung“, siehe unten). Er öffnet einen
+Der Menüpunkt **Konfigurieren → Konfiguration …** (zusammen mit „Nach Bearbeitung
+zur Zeile springen“ und der Option „Gestoppt: keine Berechnung“, siehe
+unten) öffnet einen
 Editor für `config.json` (liegt neben der `.exe` bzw. neben `main.py`).
 Der rohe JSON-Inhalt ist direkt bearbeitbar, wird beim Speichern
 validiert und wirkt für die meisten Einstellungen sofort, ohne
@@ -339,7 +344,7 @@ wenn das Programm gerade nicht läuft).
 
 ### Gestoppt: keine Berechnung
 
-Checkbox neben „⚙ Konfiguration“ (Startwert kommt aus `config.json`,
+Schalter im Menü „Konfigurieren“ (Startwert kommt aus `config.json`,
 Änderungen werden sofort dauerhaft gespeichert): Ist sie aktiv, fließen
 Titel mit VÖ +1 = „Gestoppt“ nicht in die Statistik-Box (Summe im Besitz
 usw.) und nicht in die Gesamt/Gelesen/Offen-Bilanz je Typ in der

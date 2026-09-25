@@ -1,7 +1,7 @@
 """
 gui/main_window.py
-Hauptfenster (MangaLibraryApp): Speicher-Puffer, Undo/Redo, Toolbar,
-Filter, Tabelle, Seitenleiste, Live-Log, ISBN-Abgleich-Steuerung.
+Hauptfenster (MangaLibraryApp): Speicher-Puffer, Undo/Redo, Menüleiste
+(Datei), Toolbar, Filter, Tabelle, Seitenleiste, Live-Log, ISBN-Abgleich-Steuerung.
 
 Wichtig: Alle Änderungen (neuer Eintrag, Bearbeiten, Löschen, +1-Buttons,
 CSV-Import) wirken zunächst nur auf einen Puffer im Speicher (self.data).
@@ -22,8 +22,8 @@ from datetime import date
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QComboBox, QFileDialog, QFrame,
-    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QMainWindow, QMenu,
+    QAbstractItemView, QApplication, QComboBox, QFileDialog, QFrame,
+    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QMainWindow,
     QMessageBox, QPlainTextEdit, QProgressDialog, QPushButton, QSizePolicy,
     QSplitter, QTableView, QVBoxLayout, QWidget,
 )
@@ -75,8 +75,8 @@ class MangaLibraryApp(QMainWindow):
         root = QVBoxLayout(central)
         root.setContentsMargins(8, 8, 8, 8)
 
+        self._build_menu_bar()
         self._build_toolbar(root)
-        self._build_filter_bar(root)
 
         self.main_splitter = QSplitter(Qt.Horizontal)
         self._build_table(self.main_splitter)
@@ -255,29 +255,70 @@ class MangaLibraryApp(QMainWindow):
 
     # ------------------------------------------------------------------ UI
 
+    def _build_menu_bar(self):
+        """Menüleiste: "Datei" (Eintrags-Verwaltung, CSV-Import/-Export,
+        Google-Drive-Download) und "Konfigurieren" (Farbcodierung,
+        Konfiguration, Anzeige-/Berechnungsoptionen) - früher einzelne
+        Buttons/Checkboxen in Toolbar und Filterleiste."""
+        file_menu = self.menuBar().addMenu("&Datei")
+
+        add_action = file_menu.addAction("Neuer Eintrag")
+        add_action.setShortcut(QKeySequence.New)
+        add_action.triggered.connect(self.open_add_dialog)
+
+        edit_action = file_menu.addAction("Bearbeiten")
+        edit_action.triggered.connect(self.edit_selected)
+
+        delete_action = file_menu.addAction("Löschen")
+        delete_action.triggered.connect(self.delete_selected)
+
+        file_menu.addSeparator()
+
+        import_action = file_menu.addAction("CSV importieren …")
+        import_action.triggered.connect(self.import_csv_dialog)
+
+        export_action = file_menu.addAction("CSV exportieren …")
+        export_action.triggered.connect(self.export_csv_dialog)
+
+        file_menu.addSeparator()
+
+        download_action = file_menu.addAction("Von Google Drive laden")
+        download_action.triggered.connect(self.drive_download)
+
+        config_menu = self.menuBar().addMenu("&Konfigurieren")
+
+        self._build_colors_submenu(config_menu)
+
+        config_action = config_menu.addAction("Konfiguration …")
+        config_action.setToolTip("Zentrale Konfigurationsdatei (config.json) bearbeiten")
+        config_action.triggered.connect(self.open_config_dialog)
+
+        config_menu.addSeparator()
+
+        self.follow_selection_action = config_menu.addAction("Nach Bearbeitung zur Zeile springen")
+        self.follow_selection_action.setCheckable(True)
+        self.follow_selection_action.setChecked(config.get("follow_selection_after_edit", True))
+        self.follow_selection_action.setToolTip(
+            "Wenn aktiv: springt die Ansicht nach dem Bearbeiten/Sortieren automatisch zum "
+            "bearbeiteten Eintrag. Wenn deaktiviert: die aktuelle Scroll-Position bleibt erhalten.\n"
+            "Der Wert wird dauerhaft in der Konfigurationsdatei gemerkt."
+        )
+        self.follow_selection_action.toggled.connect(
+            lambda checked: config.set_value("follow_selection_after_edit", checked)
+        )
+
+        self.exclude_gestoppt_action = config_menu.addAction("Gestoppt: keine Berechnung")
+        self.exclude_gestoppt_action.setCheckable(True)
+        self.exclude_gestoppt_action.setChecked(config.get("exclude_gestoppt_from_stats", False))
+        self.exclude_gestoppt_action.setToolTip(
+            "Wenn aktiv: Titel mit VÖ +1 = „Gestoppt“ fließen nicht in die Statistik-Box "
+            "und die Gesamt/Gelesen/Offen-Bilanz je Typ ein.\n"
+            "Der Wert wird dauerhaft in der Konfigurationsdatei gemerkt."
+        )
+        self.exclude_gestoppt_action.toggled.connect(self._on_exclude_gestoppt_toggled)
+
     def _build_toolbar(self, root):
         bar = QHBoxLayout()
-
-        bar.addWidget(QLabel("Suche:"))
-        self.search_input = QLineEdit()
-        self.search_input.setFixedWidth(240)
-        self.search_input.textChanged.connect(lambda _t: self.refresh())
-        bar.addWidget(self.search_input)
-
-        bar.addSpacing(12)
-        add_btn = QPushButton("+ Neuer Eintrag")
-        add_btn.clicked.connect(self.open_add_dialog)
-        bar.addWidget(add_btn)
-
-        edit_btn = QPushButton("Bearbeiten")
-        edit_btn.clicked.connect(self.edit_selected)
-        bar.addWidget(edit_btn)
-
-        delete_btn = QPushButton("Löschen")
-        delete_btn.clicked.connect(self.delete_selected)
-        bar.addWidget(delete_btn)
-
-        bar.addWidget(self._vline())
 
         self.undo_btn = QPushButton("↶ Rückgängig")
         self.undo_btn.setShortcut(QKeySequence.Undo)
@@ -305,23 +346,9 @@ class MangaLibraryApp(QMainWindow):
 
         bar.addWidget(self._vline())
 
-        import_btn = QPushButton("CSV importieren")
-        import_btn.clicked.connect(self.import_csv_dialog)
-        bar.addWidget(import_btn)
-
-        export_btn = QPushButton("CSV exportieren")
-        export_btn.clicked.connect(self.export_csv_dialog)
-        bar.addWidget(export_btn)
-
-        bar.addWidget(self._vline())
-
         upload_btn = QPushButton("⬆ Zu Google Drive sichern")
         upload_btn.clicked.connect(self.drive_upload)
         bar.addWidget(upload_btn)
-
-        download_btn = QPushButton("⬇ Von Google Drive laden")
-        download_btn.clicked.connect(self.drive_download)
-        bar.addWidget(download_btn)
 
         bar.addWidget(self._vline())
 
@@ -330,22 +357,20 @@ class MangaLibraryApp(QMainWindow):
         bar.addWidget(isbn_btn)
 
         bar.addWidget(self._vline())
-        bar.addWidget(self._build_colors_menu_button())
+        self._build_filter_bar(bar)
 
         bar.addStretch(1)
         root.addLayout(bar)
 
-    def _build_colors_menu_button(self):
+    def _build_colors_submenu(self, parent_menu):
         """
-        Menü-Button zum Ein-/Ausschalten der Farbcodierung je Kategorie
+        Untermenü zum Ein-/Ausschalten der Farbcodierung je Kategorie
         (VÖ +1, Komplett/Beendet, Verlag) - schreibt weiterhin in
-        config.json (colors_enabled), jetzt aber zusätzlich direkt aus der
-        Oberfläche erreichbar, nicht mehr nur per Hand-Bearbeiten der
-        Konfigurationsdatei.
+        config.json (colors_enabled), direkt aus der Oberfläche erreichbar,
+        nicht nur per Hand-Bearbeiten der Konfigurationsdatei.
         """
-        btn = QPushButton("🎨 Farben")
-        btn.setToolTip("Farbcodierung je Kategorie ein-/ausschalten (dauerhaft gespeichert)")
-        menu = QMenu(btn)
+        menu = parent_menu.addMenu("Farben")
+        menu.setToolTip("Farbcodierung je Kategorie ein-/ausschalten (dauerhaft gespeichert)")
 
         self._color_actions = {}
         enabled = config.get_dict("colors_enabled")
@@ -360,9 +385,6 @@ class MangaLibraryApp(QMainWindow):
             action.toggled.connect(lambda checked, k=key: self._on_color_toggle(k, checked))
             self._color_actions[key] = action
 
-        btn.setMenu(menu)
-        return btn
-
     def _on_color_toggle(self, key, checked):
         cfg = config.load()
         colors_enabled = dict(cfg.get("colors_enabled") or {})
@@ -371,41 +393,8 @@ class MangaLibraryApp(QMainWindow):
         self.model.colors_enabled = config.get_dict("colors_enabled")
         self.refresh()
 
-    def _build_filter_bar(self, root):
-        bar = QHBoxLayout()
-
-        config_btn = QPushButton("⚙ Konfiguration")
-        config_btn.setToolTip("Zentrale Konfigurationsdatei (config.json) bearbeiten")
-        config_btn.clicked.connect(self.open_config_dialog)
-        bar.addWidget(config_btn)
-
-        bar.addWidget(self._vline())
-
-        self.follow_selection_checkbox = QCheckBox("Nach Bearbeitung zur Zeile springen")
-        self.follow_selection_checkbox.setChecked(config.get("follow_selection_after_edit", True))
-        self.follow_selection_checkbox.setToolTip(
-            "Wenn aktiv: springt die Ansicht nach dem Bearbeiten/Sortieren automatisch zum "
-            "bearbeiteten Eintrag. Wenn deaktiviert: die aktuelle Scroll-Position bleibt erhalten.\n"
-            "Der Wert wird dauerhaft in der Konfigurationsdatei gemerkt."
-        )
-        self.follow_selection_checkbox.toggled.connect(
-            lambda checked: config.set_value("follow_selection_after_edit", checked)
-        )
-        bar.addWidget(self.follow_selection_checkbox)
-
-        self.exclude_gestoppt_checkbox = QCheckBox("Gestoppt: keine Berechnung")
-        self.exclude_gestoppt_checkbox.setChecked(config.get("exclude_gestoppt_from_stats", False))
-        self.exclude_gestoppt_checkbox.setToolTip(
-            "Wenn aktiv: Titel mit VÖ +1 = „Gestoppt“ fließen nicht in die Statistik-Box "
-            "und die Gesamt/Gelesen/Offen-Bilanz je Typ ein.\n"
-            "Der Wert wird dauerhaft in der Konfigurationsdatei gemerkt."
-        )
-        self.exclude_gestoppt_checkbox.toggled.connect(self._on_exclude_gestoppt_toggled)
-        bar.addWidget(self.exclude_gestoppt_checkbox)
-
-        bar.addWidget(self._vline())
-
-        bar.addWidget(QLabel("Filter – Verlag:"))
+    def _build_filter_bar(self, bar):
+        bar.addWidget(QLabel("Verlag:"))
         self.verlag_filter = QComboBox()
         self.verlag_filter.setMinimumWidth(160)
         self.verlag_filter.currentIndexChanged.connect(lambda _i: self.refresh())
@@ -424,9 +413,6 @@ class MangaLibraryApp(QMainWindow):
         bar.addSpacing(16)
         bar.addWidget(reset_btn)
 
-        bar.addStretch(1)
-        root.addLayout(bar)
-
     def _on_exclude_gestoppt_toggled(self, checked):
         config.set_value("exclude_gestoppt_from_stats", checked)
         self.refresh()
@@ -440,12 +426,12 @@ class MangaLibraryApp(QMainWindow):
             # nächsten Programmstart (siehe README) - eine sofortige
             # Anwendung würde sonst eine bereits von Hand verschobene
             # Seitenleiste ungefragt wieder überschreiben.
-            self.follow_selection_checkbox.blockSignals(True)
-            self.follow_selection_checkbox.setChecked(config.get("follow_selection_after_edit", True))
-            self.follow_selection_checkbox.blockSignals(False)
-            self.exclude_gestoppt_checkbox.blockSignals(True)
-            self.exclude_gestoppt_checkbox.setChecked(config.get("exclude_gestoppt_from_stats", False))
-            self.exclude_gestoppt_checkbox.blockSignals(False)
+            self.follow_selection_action.blockSignals(True)
+            self.follow_selection_action.setChecked(config.get("follow_selection_after_edit", True))
+            self.follow_selection_action.blockSignals(False)
+            self.exclude_gestoppt_action.blockSignals(True)
+            self.exclude_gestoppt_action.setChecked(config.get("exclude_gestoppt_from_stats", False))
+            self.exclude_gestoppt_action.blockSignals(False)
             self.model.colors_enabled = config.get_dict("colors_enabled")
             for key, action in self._color_actions.items():
                 action.blockSignals(True)
@@ -522,6 +508,7 @@ class MangaLibraryApp(QMainWindow):
         layout = QVBoxLayout(sidebar)
         layout.setContentsMargins(4, 0, 0, 0)
 
+        self._build_search_section(layout)
         self._build_stats_section(layout)
         self._build_counts_section(layout)
         self._build_releases_section(layout)
@@ -529,6 +516,15 @@ class MangaLibraryApp(QMainWindow):
 
         splitter.addWidget(sidebar)
         splitter.setStretchFactor(1, 0)  # die Seitenleiste behält ihre Breite beim Vergrößern des Fensters
+
+    def _build_search_section(self, layout):
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Suche:"))
+        self.search_input = QLineEdit()
+        self.search_input.setClearButtonEnabled(True)
+        self.search_input.textChanged.connect(lambda _t: self.refresh())
+        row.addWidget(self.search_input, 1)
+        layout.addLayout(row)
 
     def _build_stats_section(self, layout):
         box = QFrame()
@@ -558,7 +554,7 @@ class MangaLibraryApp(QMainWindow):
         "Gestoppt: keine Berechnung" (VÖ +1 = "Gestoppt" wird dann
         ausgeschlossen). Reine Anzahl-Auflistungen (Verlag) sind davon
         NICHT betroffen."""
-        if getattr(self, "exclude_gestoppt_checkbox", None) and self.exclude_gestoppt_checkbox.isChecked():
+        if getattr(self, "exclude_gestoppt_action", None) and self.exclude_gestoppt_action.isChecked():
             return [e for e in self.data if (e.get("voe_1") or "").strip().lower() != "gestoppt"]
         return self.data
 
@@ -797,7 +793,7 @@ class MangaLibraryApp(QMainWindow):
         self._update_releases()
         rows = self._filtered_sorted_data()
 
-        follow_selection = self.follow_selection_checkbox.isChecked()
+        follow_selection = self.follow_selection_action.isChecked()
         scroll_value = None
         if not follow_selection:
             scroll_value = self.view.verticalScrollBar().value()
