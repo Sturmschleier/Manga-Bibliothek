@@ -112,6 +112,11 @@ def ja_nein_color(value: str):
 # order_mail.py / database.HIDDEN_COLUMNS "bestellt").
 BESTELLT_COLOR = "#BFE3FF"
 
+# Heller roter Balken links an der Titelzelle: bestellter Band ist angekommen
+# (abholbereit) - siehe order_mail.py / database.HIDDEN_COLUMNS "angekommen".
+ANGEKOMMEN_COLOR = "#FF8A8A"
+ANGEKOMMEN_BAR_WIDTH = 6
+
 
 def zebra_color(row_index: int):
     return ZEBRA_EVEN if row_index % 2 == 0 else ZEBRA_ODD

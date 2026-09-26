@@ -21,6 +21,11 @@ from html.parser import HTMLParser
 from typing import Optional
 
 _PRICE_RE = re.compile(r"^\d[\d.,]*\s*(EUR|€)$", re.IGNORECASE)
+# "…04-EAN:9783755507260" am Ende des Artikelnamens
+_EAN_SUFFIX_RE = re.compile(r"[\s-]*EAN\s*:?\s*\d+\s*$", re.IGNORECASE)
+
+KIND_ORDER = "bestellung"    # Bestellbestätigung: Artikel wurden bestellt
+KIND_PICKUP = "abholung"     # Abhol-Benachrichtigung: Artikel sind angekommen
 _BAND_RE = re.compile(r"^(?:band\s+|bd\s+|vol\s+|volume\s+)?(\d+)(?=\s|$)")
 
 
@@ -29,6 +34,7 @@ class OrderItem:
     """Ein bestellter Artikel, wie er in der E-Mail steht."""
     name: str
     menge: int = 1
+    kind: str = KIND_ORDER
 
 
 class _RowCollector(HTMLParser):
@@ -37,6 +43,7 @@ class _RowCollector(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.rows = []
+        self.text = []
         self._row = None
         self._cell = None
 
@@ -55,8 +62,11 @@ class _RowCollector(HTMLParser):
         elif tag == "tr" and self._row is not None:
             self.rows.append(self._row)
             self._row = None
+        elif tag == "table":
+            self.rows.append([])  # Tabellenende als Trennmarke (verschachtelte Tabellen verlieren sonst ihre Zeilengrenzen)
 
     def handle_data(self, data):
+        self.text.append(data)
         if self._cell is not None:
             self._cell.append(data)
 
@@ -78,19 +88,45 @@ def parse_message_bytes(raw: bytes) -> list[OrderItem]:
     return parse_html(body.get_content())
 
 
+def _clean_name(name: str) -> str:
+    return _EAN_SUFFIX_RE.sub("", name).strip()
+
+
 def parse_html(html_text: str) -> list[OrderItem]:
+    """Liest die Artikel aus dem HTML einer Bestell-Mail. Die Art der Mail
+    ergibt sich aus der Tabellenstruktur (nicht aus Textbausteinen):
+      - Bestellbestätigung: Zeilen "Name | Anzahl | Preis EUR"  (KIND_ORDER)
+      - Abhol-Benachrichtigung ("… abholbereit"): keine Preise, stattdessen
+        eine Tabelle mit den Spalten "Artikel | Menge"  (KIND_PICKUP)
+    """
     collector = _RowCollector()
     collector.feed(html_text)
     collector.close()
 
-    items = []
+    ordered, picked_up = [], []
+    in_pickup_table = False
     for cells in collector.rows:
         cells = [c for c in cells if c != ""]
-        # Artikelzeile: Name | Anzahl (ganze Zahl) | Preis (z.B. "8,50 EUR")
+        # Bestellzeile: Name | Anzahl (ganze Zahl) | Preis (z.B. "8,50 EUR")
         if len(cells) >= 3 and cells[1].isdigit() and _PRICE_RE.match(cells[2]):
-            items.append(OrderItem(name=cells[0], menge=int(cells[1])))
+            ordered.append(OrderItem(_clean_name(cells[0]), int(cells[1]), KIND_ORDER))
+            continue
+        # Abhol-Mail: Kopfzeile "Artikel | Menge", danach je Artikel "Name | Menge"
+        if [c.casefold() for c in cells[:2]] == ["artikel", "menge"] and len(cells) == 2:
+            in_pickup_table = True
+            continue
+        if in_pickup_table:
+            if len(cells) == 2 and cells[1].isdigit():
+                picked_up.append(OrderItem(_clean_name(cells[0]), int(cells[1]), KIND_PICKUP))
+                continue
+            in_pickup_table = False
+
+    items = ordered or picked_up
     if not items:
-        raise ValueError("In der E-Mail wurde keine Artikelliste (Name, Anzahl, Preis) gefunden.")
+        raise ValueError(
+            "In der E-Mail wurde keine Artikelliste gefunden "
+            "(Bestellbestätigung: Name, Anzahl, Preis - Abholmail: Artikel, Menge)."
+        )
     return items
 
 
@@ -135,7 +171,7 @@ def match_items(items, entries):
     candidates.sort(key=lambda c: len(c[0]), reverse=True)
 
     matches, already_owned, unmatched = [], [], []
-    seen_ids = set()
+    seen = set()
     for item in items:
         name = _normalize(item.name)
         found = None
@@ -162,8 +198,8 @@ def match_items(items, entries):
         owned = _as_int(found.entry.get("baende_bis"))
         if owned is not None and found.band <= owned:
             already_owned.append(found)
-        elif id(found.entry) not in seen_ids:
-            seen_ids.add(id(found.entry))
+        elif (id(found.entry), item.kind) not in seen:
+            seen.add((id(found.entry), item.kind))
             matches.append(found)
     return matches, already_owned, unmatched
 

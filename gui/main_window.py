@@ -58,6 +58,7 @@ class MangaLibraryApp(QMainWindow):
 
         config.ensure_file_exists()
         changelog.archive_old_entries()
+        changelog.prune_isbn_logs()
 
         db.init_db()
 
@@ -410,6 +411,8 @@ class MangaLibraryApp(QMainWindow):
             ("voe1", "VÖ +1 (Beendet/TBA/Gestoppt/NA)"),
             ("komplett_beendet", "Komplett/Beendet"),
             ("verlag", "Verlag"),
+            ("bestellt", "Titel bestellt (hellblau)"),
+            ("angekommen", "Titel angekommen (roter Balken links)"),
         ):
             action = menu.addAction(label)
             action.setCheckable(True)
@@ -500,6 +503,14 @@ class MangaLibraryApp(QMainWindow):
         lbl.setStyleSheet(f"background-color: {color}; border: 1px solid #888;")
         return lbl
 
+    @staticmethod
+    def _bar_swatch(color):
+        """Legenden-Feld für den Balken links (Balken in Farbe, Rest neutral)."""
+        lbl = QLabel()
+        lbl.setFixedSize(14, 14)
+        lbl.setStyleSheet(f"background-color: #ffffff; border: 1px solid #888; border-left: 5px solid {color};")
+        return lbl
+
     def _build_footer_legend(self):
         """VÖ+1-/Komplett-Beendet-Farblegende als dauerhaft sichtbarer
         Bereich der Statuszeile (rechts, bleibt unabhängig von normalen
@@ -534,6 +545,9 @@ class MangaLibraryApp(QMainWindow):
         row.addSpacing(12)
         row.addWidget(self._swatch(colors.BESTELLT_COLOR))
         row.addWidget(QLabel("Titel bestellt"))
+        row.addSpacing(6)
+        row.addWidget(self._bar_swatch(colors.ANGEKOMMEN_COLOR))
+        row.addWidget(QLabel("angekommen"))
 
         self.statusBar().addPermanentWidget(legend)
 
@@ -917,25 +931,27 @@ class MangaLibraryApp(QMainWindow):
         menu = QMenu(self.view)
         menu.addAction("Bei buchhandel.de suchen", self.search_selected_on_buchhandel)
         entry = self._find_entry(self._selected_id())
-        if entry is not None and entry.get("bestellt"):
-            menu.addAction("Bestellt-Markierung entfernen", self.clear_ordered_mark)
+        if entry is not None and (entry.get("bestellt") or entry.get("angekommen")):
+            menu.addAction("Bestellt-/Angekommen-Markierung entfernen", self.clear_ordered_mark)
         menu.addSeparator()
         menu.addAction("Bearbeiten", self.edit_selected)
         menu.addAction("Löschen", self.delete_selected)
         menu.exec(self.view.viewport().mapToGlobal(pos))
 
     def clear_ordered_mark(self):
-        """Entfernt die hellblaue "bestellt"-Markierung des markierten
-        Eintrags von Hand (z. B. bei einer Fehlzuordnung oder Stornierung)."""
+        """Entfernt die "bestellt"- (hellblau) und "angekommen"-Markierung
+        (roter Balken) des markierten Eintrags von Hand (z. B. bei einer
+        Fehlzuordnung oder Stornierung)."""
         entry = self._find_entry(self._selected_id())
-        if entry is None or not entry.get("bestellt"):
+        if entry is None or not (entry.get("bestellt") or entry.get("angekommen")):
             return
         self._push_undo_snapshot()
         entry["bestellt"] = ""
+        entry["angekommen"] = ""
         self._mark_dirty()
         self._commit_pending_action()
         self.refresh()
-        self._log(f"Bestellt-Markierung entfernt: „{entry.get('titel')}“.")
+        self._log(f"Bestellt-/Angekommen-Markierung entfernt: „{entry.get('titel')}“.")
 
     def search_selected_on_buchhandel(self):
         """Öffnet im Standardbrowser die buchhandel.de-Suche für den
@@ -1019,7 +1035,8 @@ class MangaLibraryApp(QMainWindow):
             self._discard_pending_snapshot()
             QMessageBox.warning(self, "Hinweis", "„Bände (bis)“ enthält keine gültige Zahl.")
             return
-        entry["bestellt"] = ""  # der bestellte Band ist angekommen -> Markierung entfällt
+        entry["bestellt"] = ""  # der bestellte Band ist im Bestand -> beide Markierungen entfallen
+        entry["angekommen"] = ""
         self.selected_row_id = row_id
         self._mark_dirty()
         self._commit_pending_action()
@@ -1120,28 +1137,38 @@ class MangaLibraryApp(QMainWindow):
         self._apply_order_items(items, len(paths) - len(problems), problems)
 
     def _apply_order_items(self, items, mail_count, problems=()):
-        """Ordnet die bestellten Artikel den Einträgen zu und markiert diese
-        (Feld "bestellt", hellblau in der Tabelle). Gemeinsamer Weg für
-        .eml-Dateien und den Postfach-Abruf. Ins Log geht nur, welche Titel
-        markiert wurden - nichts aus den E-Mails selbst."""
+        """Ordnet die Artikel den Einträgen zu und markiert diese: Bestell-
+        bestätigung -> Feld "bestellt" (Titel hellblau), Abhol-Benachrichtigung
+        -> Feld "angekommen" (roter Balken links am Titel). Gemeinsamer Weg
+        für .eml-Dateien und den Postfach-Abruf. Ins Log geht nur, welche
+        Titel markiert wurden - nichts aus den E-Mails selbst."""
         matches, already_owned, unmatched = order_mail.match_items(items, self.data)
-        new_matches = [m for m in matches if not m.entry.get("bestellt")]
+        flag_of = {order_mail.KIND_ORDER: "bestellt", order_mail.KIND_PICKUP: "angekommen"}
+        new_matches = [m for m in matches if not m.entry.get(flag_of[m.item.kind])]
+        new_ordered = [m for m in new_matches if m.item.kind == order_mail.KIND_ORDER]
+        new_arrived = [m for m in new_matches if m.item.kind == order_mail.KIND_PICKUP]
 
         if new_matches:
             self._push_undo_snapshot()
             for m in new_matches:
-                m.entry["bestellt"] = "1"
+                m.entry[flag_of[m.item.kind]] = "1"
             self._mark_dirty()
             self._commit_pending_action()
             self.refresh()
-            self._log(
-                f"Bestellung eingelesen: {len(new_matches)} Titel markiert ("
-                + ", ".join(f"{m.entry.get('titel')} Bd. {m.band}" for m in new_matches) + ")."
-            )
+            for label, group in (("bestellt", new_ordered), ("angekommen", new_arrived)):
+                if group:
+                    self._log(
+                        f"Bestellung eingelesen: {len(group)} Titel als {label} markiert ("
+                        + ", ".join(f"{m.entry.get('titel')} Bd. {m.band}" for m in group) + ")."
+                    )
 
         lines = [f"{mail_count} E-Mail(s), {len(items)} Artikel, {len(matches)} Titel zugeordnet."]
+        if new_ordered:
+            lines.append(f"{len(new_ordered)} neu als bestellt markiert (hellblau).")
+        if new_arrived:
+            lines.append(f"{len(new_arrived)} neu als angekommen markiert (roter Balken).")
         if new_matches:
-            lines.append(f"{len(new_matches)} neu hellblau markiert – noch nicht gespeichert (💾 Speichern).")
+            lines.append("Noch nicht gespeichert – bitte auf „💾 Speichern“ klicken.")
         if len(matches) > len(new_matches):
             lines.append(f"{len(matches) - len(new_matches)} waren bereits markiert.")
         if already_owned:

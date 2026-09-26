@@ -151,7 +151,10 @@ Antwort eine klare Fehlermeldung im Log statt lautlos nichts zu finden.
 Jeder Abgleich schreibt zusätzlich eine vollständige Log-Datei in einen
 Ordner **`LOG`** neben der `.exe` (bzw. neben `main.py` im Quellcode-
 Betrieb). Der Dateiname enthält Datum und Uhrzeit, z. B.
-`LOG/isbn_abgleich_2026-09-04_14-32-05.log`.
+`LOG/isbn_abgleich_2026-09-04_14-32-05.log`. Es bleiben nur die neuesten
+**10** Logdateien liegen – ältere werden nach jedem Abgleich und beim
+Programmstart automatisch gelöscht. Die Anzahl ist in der `config.json`
+über `isbn_log_keep` einstellbar (mindestens 1).
 
 Darin steht für **jeden** durchsuchten Titel:
 - jede abgesetzte DNB-SRU-Anfrage (CQL-Query und vollständige URL) – bei
@@ -249,12 +252,27 @@ markiert.
   (Legende unten: „Titel bestellt“). Nach dem Einlesen zeigt ein Fenster,
   wie viele Titel markiert wurden und – unter „Details“ – welche Artikel
   keinem Eintrag zugeordnet werden konnten oder schon im Bestand sind.
-- Klickt man bei „Bände (bis)“ auf **+1**, verschwindet die Markierung
-  dieses Titels. Von Hand entfernen geht per Rechtsklick auf die Zeile →
-  „Bestellt-Markierung entfernen“.
+- **Abholbereit/angekommen:** Kommt später die Mail „Ihre Bestellung ist in
+  Ihrer Buchhandlung abholbereit“, wird sie auf denselben Wegen (Datei,
+  Drag & Drop, Postfach) erkannt – an der Struktur der Artikeltabelle, nicht
+  am Betreff – und der Titel bekommt zusätzlich einen **hellroten Balken
+  links** in der Titelzelle (Legende: „angekommen“). Die hellblaue
+  Bestell-Markierung bleibt dabei erhalten, beide Markierungen können also
+  gleichzeitig sichtbar sein.
+- Klickt man bei „Bände (bis)“ auf **+1**, verschwinden **beide**
+  Markierungen dieses Titels (hellblau und roter Balken). Von Hand
+  entfernen geht per Rechtsklick auf die Zeile → „Bestellt-/Angekommen-
+  Markierung entfernen“.
+- **Ein-/Ausschalten:** Unter *Konfigurieren → Farben* lassen sich
+  „Titel bestellt (hellblau)“ und „Titel angekommen (roter Balken links)“
+  wie die übrigen Farbcodierungen einzeln an- und ausschalten
+  (`colors_enabled` → `bestellt` / `angekommen` in der `config.json`).
+  Ausgeschaltet bleiben die Markierungen im Datenbestand erhalten, werden
+  nur nicht angezeigt.
 - Die Markierung ist ein normaler Teil des Eintrags: sie wirkt auf
   Rückgängig/Wiederholen, wird erst mit „💾 Speichern“ dauerhaft und steht
-  in der Datenbank (Feld `bestellt`), aber nicht im CSV-Export.
+  in der Datenbank (Felder `bestellt` und `angekommen`), aber nicht im
+  CSV-Export.
 - **Die E-Mail selbst wird nicht gespeichert.** Sie wird nur gelesen und im
   Speicher ausgewertet; weder Adresse noch Bestellnummer noch Preise werden
   übernommen. Im Live-Log/Änderungsprotokoll landen nur die markierten Titel.
@@ -392,10 +410,13 @@ Zeile im Live-Log unten in der Seitenleiste – sitzungsbasiert, d. h. die
 Anzeige beginnt bei jedem Programmstart wieder leer.
 
 Zusätzlich wird jede Änderung dauerhaft in `LOG/aenderungen.log`
-protokolliert. Einträge, die älter als 6 Monate sind, werden beim
-nächsten Programmstart automatisch nach `LOG/aenderungen_archiv.log`
-verschoben (nicht gelöscht) – die laufende Datei bleibt dadurch
-überschaubar, die Historie bleibt trotzdem vollständig erhalten.
+protokolliert. Einträge, die älter als `log_retention_days` Tage sind
+(Standard **182**, also ca. 6 Monate), werden beim nächsten Programmstart
+automatisch nach `LOG/aenderungen_archiv.log` verschoben (nicht gelöscht)
+– die laufende Datei bleibt dadurch überschaubar, die Historie bleibt
+trotzdem vollständig erhalten. Die Anzahl der Tage ist in der
+`config.json` über `log_retention_days` einstellbar (wirkt beim nächsten
+Programmstart).
 
 ## Zentrale Konfiguration
 
@@ -415,7 +436,9 @@ Neustart. Enthält u. a.:
 | `follow_selection_after_edit` | Startwert von „Nach Bearbeitung zur Zeile springen“ | `true` |
 | `sidebar_width_fraction` | Anteil der Fensterbreite für die Seitenleiste – **wirkt erst beim nächsten Programmstart** (bewusst so: eine bereits von Hand am Trenner verschobene Breite soll nicht ungefragt überschrieben werden) | `0.15` |
 | `exclude_gestoppt_from_stats` | Startwert von „Gestoppt: keine Berechnung“ | `false` |
-| `colors_enabled` | Farbcodierung je Kategorie (de)aktivieren: `voe1`, `komplett_beendet`, `verlag` (jeweils `true`/`false`). **Nur über diese Datei einstellbar, keine eigene Oberfläche dafür.** Deaktivierte Kategorien zeigen stattdessen die normale Zebra-Streifung. | alle `true` |
+| `isbn_log_keep` | Wie viele ISBN-Abgleich-Logdateien (`LOG/isbn_abgleich_*.log`) liegen bleiben; die ältesten werden gelöscht (mindestens 1) | `10` |
+| `log_retention_days` | Änderungsprotokoll: Einträge älter als so viele Tage wandern ins Archiv | `182` |
+| `colors_enabled` | Farbcodierung je Kategorie (de)aktivieren: `voe1`, `komplett_beendet`, `verlag`, `bestellt`, `angekommen` (jeweils `true`/`false`; auch über *Konfigurieren → Farben* schaltbar). Deaktivierte Kategorien zeigen stattdessen die normale Zebra-Streifung. | alle `true` |
 
 Die Datei lässt sich auch direkt in einem Texteditor bearbeiten (z. B.
 wenn das Programm gerade nicht läuft).

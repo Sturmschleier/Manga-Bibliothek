@@ -67,6 +67,5 @@ def test_hidden_column_bestellt_is_stored_but_not_a_visible_column(tmp_path, mon
     assert "bestellt" not in db.COLUMN_NAMES
     assert "bestellt" in db.STORED_COLUMN_NAMES
 
-    loaded = db.replace_all([{"titel": "A", "bestellt": "1"}, {"titel": "B"}])
-    by_title = {e["titel"]: e["bestellt"] for e in loaded}
-    assert by_title == {"A": "1", "B": ""}
+    loaded = db.replace_all([{"titel": "A", "bestellt": "1", "angekommen": "1"}, {"titel": "B"}])
+    assert {e["titel"]: (e["bestellt"], e["angekommen"]) for e in loaded} == {"A": ("1", "1"), "B": ("", "")}

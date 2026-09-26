@@ -26,6 +26,9 @@ DEFAULTS = {
     # Fallback-Suche, wenn keine ISBN automatisch gefunden wurde:
     # "buchhandel.de" (Standard) oder "manga-passion"
     "isbn_fallback_provider": "buchhandel.de",
+    # Protokolle (LOG-Ordner, siehe changelog.py)
+    "isbn_log_keep": 10,        # so viele ISBN-Abgleich-Logdateien bleiben liegen (die ältesten werden gelöscht)
+    "log_retention_days": 182,  # Änderungsprotokoll: Einträge älter als N Tage wandern ins Archiv
     # Postfach-Abruf von Bestellbestätigungen (IMAP, siehe mail_fetch.py).
     # Das Passwort steht bewusst NICHT hier, sondern (optional) in den
     # Windows-Anmeldeinformationen bzw. wird bei Bedarf abgefragt.
@@ -52,6 +55,8 @@ DEFAULTS = {
         "voe1": True,             # VÖ +1: Beendet/TBA/Gestoppt/NA
         "komplett_beendet": True,  # Komplett/Beendet: Ja/Nein
         "verlag": True,            # automatische Farbe je Verlag
+        "bestellt": True,          # Titel hellblau: nächster Band bestellt
+        "angekommen": True,        # Titel mit rotem Balken: Band abholbereit
     },
 }
 
@@ -109,6 +114,17 @@ def get_float(key: str, default: float = None) -> float:
     try:
         return float(value)
     except (TypeError, ValueError):
+        return default
+
+
+def get_int(key: str, default: int = None) -> int:
+    """Wie `get()`, aber typsicher für ganze Zahlen: liefert immer ein `int`
+    (bei Unsinn in der Datei den Standardwert statt einer Exception)."""
+    if default is None:
+        default = DEFAULTS.get(key, 0)
+    try:
+        return int(get(key, default))
+    except (TypeError, ValueError, OverflowError):
         return default
 
 

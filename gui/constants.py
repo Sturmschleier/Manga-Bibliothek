@@ -39,6 +39,7 @@ COL_DEFAULT_WIDTHS = {
 }
 
 ROW_ID_ROLE = Qt.UserRole + 1
+BAR_COLOR_ROLE = Qt.UserRole + 2  # Farbe des Balkens links in der Zelle (oder None)
 PLUS_BTN_WIDTH = 30
 PLUS_BTN_MARGIN = 4
 MAX_UNDO_STEPS = 50

@@ -34,6 +34,7 @@ from typing import Optional
 import requests
 
 from paths import base_dir
+import changelog
 import config
 import sorting
 
@@ -137,6 +138,7 @@ def _write_log_file(lines: list[str]) -> str:
     filename = "isbn_abgleich_" + datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + ".log"
     log_path = log_dir / filename
     log_path.write_text("\n".join(lines), encoding="utf-8")
+    changelog.prune_isbn_logs()  # nur die neuesten "isbn_log_keep" Logdateien behalten
     return str(log_path)
 
 

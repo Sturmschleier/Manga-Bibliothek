@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 import mail_fetch
+import order_mail
 
 _SECURITY_LABELS = {"ssl": "SSL/TLS (Port 993)", "starttls": "STARTTLS (Port 143)"}
 
@@ -242,7 +243,9 @@ class MailSelectDialog(QDialog):
         for mail in self._usable:
             when = mail.date.strftime("%d.%m.%Y") if mail.date else "ohne Datum"
             count = sum(i.menge for i in mail.items)
-            item = QListWidgetItem(f"{when}  ·  {mail.subject or '(ohne Betreff)'}  ·  {count} Artikel")
+            arrived = all(i.kind == order_mail.KIND_PICKUP for i in mail.items)
+            kind = "abholbereit" if arrived else "Bestellung"
+            item = QListWidgetItem(f"{when}  ·  {kind}  ·  {mail.subject or '(ohne Betreff)'}  ·  {count} Artikel")
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
             item.setCheckState(Qt.Checked)
             self.list_widget.addItem(item)
