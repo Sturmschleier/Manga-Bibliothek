@@ -16,8 +16,8 @@ import colors
 import config
 
 from .constants import (
-    INCREMENTABLE_COLUMNS, PLUS_BTN_MARGIN, PLUS_BTN_WIDTH, ROW_ID_ROLE,
-    RUCKSTAND_COLUMN, _ruckstand_value,
+    BAR_COLOR_ROLE, INCREMENTABLE_COLUMNS, PLUS_BTN_MARGIN, PLUS_BTN_WIDTH,
+    ROW_ID_ROLE, RUCKSTAND_COLUMN, _ruckstand_value,
 )
 
 class MangaTableModel(QAbstractTableModel):
@@ -76,11 +76,15 @@ class MangaTableModel(QAbstractTableModel):
         if role == Qt.DisplayRole:
             return entry.get(col, "") or ""
         if role == Qt.BackgroundRole:
-            if col == "titel" and entry.get("bestellt"):
+            if col == "titel" and entry.get("bestellt") and self.colors_enabled.get("bestellt", True):
                 return QColor(colors.BESTELLT_COLOR)
             return QColor(colors.cell_background(col, entry.get(col, "") or "", index.row(), self.colors_enabled))
         if role == Qt.ForegroundRole:
             return QColor(colors.DEFAULT_TEXT_COLOR)
+        if role == BAR_COLOR_ROLE:
+            if col == "titel" and entry.get("angekommen") and self.colors_enabled.get("angekommen", True):
+                return QColor(colors.ANGEKOMMEN_COLOR)
+            return None
         if role == ROW_ID_ROLE:
             return entry.get("id")
         return None
@@ -117,8 +121,14 @@ class CellDelegate(QStyledItemDelegate):
         if bg:
             painter.fillRect(option.rect, bg)
 
+        bar = index.data(BAR_COLOR_ROLE)
+        bar_width = 0
+        if bar:
+            bar_width = colors.ANGEKOMMEN_BAR_WIDTH
+            painter.fillRect(QRect(option.rect.left(), option.rect.top(), bar_width, option.rect.height()), bar)
+
         text = str(index.data(Qt.DisplayRole) or "")
-        text_rect = option.rect.adjusted(4, 0, -4, 0)
+        text_rect = option.rect.adjusted(4 + bar_width, 0, -4, 0)
         is_incrementable = col in INCREMENTABLE_COLUMNS
         if is_incrementable:
             text_rect.setRight(text_rect.right() - PLUS_BTN_WIDTH - PLUS_BTN_MARGIN)

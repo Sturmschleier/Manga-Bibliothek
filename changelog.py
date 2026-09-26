@@ -7,18 +7,24 @@ protokolliert.
 - Live-Anzeige in der Oberfläche: nur für die laufende Sitzung (wird beim
   nächsten Programmstart nicht erneut geladen).
 - Datei LOG/aenderungen.log: dauerhaft, über Sitzungen hinweg. Einträge,
-  die älter als 6 Monate sind, werden beim nächsten Programmstart
-  automatisch nach LOG/aenderungen_archiv.log verschoben (nicht gelöscht).
+  die älter als `log_retention_days` Tage sind (config.json, Standard 182
+  = ca. 6 Monate), werden beim nächsten Programmstart automatisch nach
+  LOG/aenderungen_archiv.log verschoben (nicht gelöscht).
+- Dateien LOG/isbn_abgleich_*.log (ein ISBN-Abgleich je Datei): es bleiben
+  nur die neuesten `isbn_log_keep` Dateien liegen (Standard 10), ältere
+  werden gelöscht - siehe prune_isbn_logs().
 """
 
 from datetime import datetime, timedelta
 
+import config
 from paths import base_dir
 
 LOG_DIR = base_dir() / "LOG"
 CHANGELOG_FILE = LOG_DIR / "aenderungen.log"
 ARCHIVE_FILE = LOG_DIR / "aenderungen_archiv.log"
-RETENTION_DAYS = 182  # ~6 Monate
+RETENTION_DAYS = 182  # ~6 Monate (Standardwert, überschreibbar über config.json "log_retention_days")
+ISBN_LOG_PATTERN = "isbn_abgleich_*.log"
 
 _TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 
@@ -50,7 +56,33 @@ def _extract_timestamp(line: str):
         return None
 
 
-def archive_old_entries(retention_days: int = RETENTION_DAYS) -> int:
+def prune_isbn_logs(keep: int = None) -> int:
+    """
+    Löscht die ältesten ISBN-Abgleich-Logdateien (LOG/isbn_abgleich_*.log),
+    sodass höchstens `keep` Dateien übrig bleiben (Standard: config.json
+    "isbn_log_keep", mindestens 1). Der Dateiname enthält Datum und Uhrzeit,
+    "älter" richtet sich daher nach dem Namen. Gibt die Anzahl gelöschter
+    Dateien zurück; Fehler (z.B. gesperrte Datei) werden ignoriert - das ist
+    reines Aufräumen und darf weder Programmstart noch Abgleich stören.
+    """
+    if keep is None:
+        keep = config.get_int("isbn_log_keep", 10)
+    keep = max(1, keep)
+    deleted = 0
+    try:
+        files = sorted(LOG_DIR.glob(ISBN_LOG_PATTERN), key=lambda p: p.name)
+    except OSError:
+        return 0
+    for path in files[:-keep]:
+        try:
+            path.unlink()
+            deleted += 1
+        except OSError:
+            pass
+    return deleted
+
+
+def archive_old_entries(retention_days: int = None) -> int:
     """
     Verschiebt Einträge, die älter als `retention_days` sind, aus der
     laufenden Log-Datei in die Archiv-Datei (angehängt, nicht überschrieben).
@@ -62,6 +94,9 @@ def archive_old_entries(retention_days: int = RETENTION_DAYS) -> int:
     statt den Programmstart mit einer unbehandelten Exception zu verhindern
     - die Archivierung ist ein reines Aufräumen, kein kritischer Vorgang.
     """
+    if retention_days is None:
+        retention_days = config.get_int("log_retention_days", RETENTION_DAYS)
+    retention_days = max(1, retention_days)
     try:
         if not CHANGELOG_FILE.exists():
             return 0

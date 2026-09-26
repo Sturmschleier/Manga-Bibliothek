@@ -88,3 +88,57 @@ def test_title_must_match_whole_word():
     entries = [_entry("San", 1)]
     _, _, unmatched = order_mail.match_items([order_mail.OrderItem("Sanda 2")], entries)
     assert len(unmatched) == 1
+
+
+_PICKUP_HTML = (
+    "<html><body><table>"
+    "<tr><td>Folgende Artikel Ihrer Bestellung wurden f&uuml;r die Auslieferung an Ihre Buchhandlung "
+    "zusammengestellt und stehen <b>zur Abholung</b> bereit.</td></tr>"
+    "<tr><td><table>"
+    "<tr><td><b>Artikel</b></td><td><b>Menge</b></td></tr>"
+    "<tr><td>Rairairai 04-EAN:9783755507260</td><td>1</td></tr>"
+    "<tr><td>Sanda - Band 12-EAN:9781234567890</td><td>1</td></tr>"
+    "</table></td></tr>"
+    "<tr><td>Anzahl bestellte Exemplare:</td><td>2</td></tr>"
+    "<tr><td><table>"
+    "<tr><td>Nr</td><td>Artikel</td><td>Best. Exempl.</td><td>Gelief. Exempl.</td><td>Status</td></tr>"
+    "<tr><td>1</td><td>Rairairai 04- EAN:9783755507260</td><td>1</td><td>1</td><td>komplett ausgeliefert</td></tr>"
+    "</table></td></tr>"
+    "</table></body></html>"
+)
+
+
+def test_parse_pickup_mail_reads_article_table_once_and_strips_ean():
+    items = order_mail.parse_html(_PICKUP_HTML)
+    assert [(i.name, i.kind) for i in items] == [
+        ("Rairairai 04", order_mail.KIND_PICKUP),
+        ("Sanda - Band 12", order_mail.KIND_PICKUP),
+    ]
+
+
+def test_order_confirmation_is_not_treated_as_pickup():
+    # auch wenn im Mailtext "abholbereit"/"Abholung" vorkommt: Preise => Bestellbestätigung
+    html = _html(("Sanda - Band 12", 1, "9,00 EUR")).replace("<table>", "<p>Sobald Ihre Bestellung abholbereit ist ... zur Abholung bereit</p><table>", 1)
+    items = order_mail.parse_html(html)
+    assert [i.kind for i in items] == [order_mail.KIND_ORDER]
+
+
+def test_pickup_items_match_entries_like_orders():
+    entries = [_entry("Rairairai", 3), _entry("Sanda", 11)]
+    items = order_mail.parse_html(_PICKUP_HTML)
+    matches, owned, unmatched = order_mail.match_items(items, entries)
+    assert [(m.entry["titel"], m.band, m.item.kind) for m in matches] == [
+        ("Rairairai", 4, order_mail.KIND_PICKUP),
+        ("Sanda", 12, order_mail.KIND_PICKUP),
+    ]
+    assert owned == [] and unmatched == []
+
+
+def test_order_and_pickup_for_same_title_are_both_kept():
+    entries = [_entry("Sanda", 11)]
+    items = [
+        order_mail.OrderItem("Sanda - Band 12", kind=order_mail.KIND_ORDER),
+        order_mail.OrderItem("Sanda - Band 12", kind=order_mail.KIND_PICKUP),
+    ]
+    matches, _, _ = order_mail.match_items(items, entries)
+    assert sorted(m.item.kind for m in matches) == sorted([order_mail.KIND_ORDER, order_mail.KIND_PICKUP])

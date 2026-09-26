@@ -55,8 +55,13 @@ COLUMN_NAMES = [c[0] for c in COLUMNS]
 #              (E-Mail-Import, siehe order_mail.py) bestellt wurde - wird in
 #              der Tabelle hellblau am Titel markiert und beim "+1" auf
 #              "Bände (bis)" wieder zurückgesetzt.
+#   angekommen = "1", wenn laut Abhol-Benachrichtigung (E-Mail, siehe
+#              order_mail.py) der bestellte Band in der Buchhandlung
+#              abholbereit ist - roter Balken links an der Titelzelle;
+#              wird beim "+1" auf "Bände (bis)" ebenfalls zurückgesetzt.
 HIDDEN_COLUMNS = [
     ("bestellt", "TEXT"),
+    ("angekommen", "TEXT"),
 ]
 STORED_COLUMNS = COLUMNS + HIDDEN_COLUMNS
 STORED_COLUMN_NAMES = [c[0] for c in STORED_COLUMNS]
