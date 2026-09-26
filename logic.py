@@ -8,8 +8,8 @@ Puffer-Eintrag (Dict) arbeitet – ohne Datenbankzugriff. So bleiben
 import re
 from typing import Optional, Union
 
-from database import VOE_COLUMNS
 import sorting
+from database import VOE_COLUMNS
 
 # Sentinel-Rückgabewert von increment_gelesen(), siehe dort. Als benannte
 # Konstante statt eines an mehreren Stellen wiederholten "Magic String".
@@ -31,7 +31,7 @@ def parse_int(value) -> Optional[int]:
 
 # Sieht aus wie ein Datum (nur Ziffern und Punkte), z.B. "15.13.2026"
 _DATE_LIKE_RE = re.compile(r"^[\d.]+$")
-_DATE_FIELDS = ("zugang",) + tuple(VOE_COLUMNS)
+_DATE_FIELDS = ("zugang", *VOE_COLUMNS)
 
 
 def validate_entry(values: dict, other_titles=()) -> list[str]:
@@ -118,7 +118,7 @@ def increment_baende(entry: dict) -> Optional[int]:
 
     if (entry.get("voe_1") or "").strip().lower() != "fortlaufend":
         voe_values = [entry.get(key) or "" for key in VOE_COLUMNS]
-        shifted = voe_values[1:] + [""]
+        shifted = [*voe_values[1:], ""]
         if not any(v.strip() for v in shifted):
             shifted[0] = "NA"
         for key, value in zip(VOE_COLUMNS, shifted):

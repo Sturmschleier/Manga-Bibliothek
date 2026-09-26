@@ -12,6 +12,8 @@ Bewusst ohne Netzwerk-/Qt-Abhängigkeiten, damit sowohl der Dialog als auch
 isbn_lookup.py dieses Modul nutzen können.
 """
 
+from typing import Optional
+
 import config
 
 # Alternative Anbieter: Anzeigename -> Link-Vorlage ({isbn} wird ersetzt).
@@ -46,7 +48,7 @@ def set_active(name: str) -> None:
         config.set_value("isbn_shop_active", name)
 
 
-def order_url(isbn: str, shop: str = None) -> str:
+def order_url(isbn: str, shop: Optional[str] = None) -> str:
     """Link zur ISBN beim gewählten (oder angegebenen) Anbieter."""
     shops = available()
     template = shops.get(shop or active_name()) or next(iter(shops.values()))

@@ -8,7 +8,6 @@ from datetime import date
 
 import sorting
 
-
 # -------------------------------------------------------------------- parse_date
 
 def test_parse_date_full_date():

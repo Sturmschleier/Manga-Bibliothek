@@ -109,7 +109,9 @@ def test_cql_term_quotes_and_removes_special_characters():
 
 def test_cql_title_searches_all_words_or_exact_phrase():
     # Gedankenstrich/Doppelpunkt: Wortfolge allein fand bei der DNB nichts
-    assert isbn_lookup._cql_title("Nura – Herr der Yokai") == '(tit all "Nura Herr der Yokai" or tit="Nura – Herr der Yokai")'
+    assert isbn_lookup._cql_title("Nura – Herr der Yokai") == (
+        '(tit all "Nura Herr der Yokai" or tit="Nura – Herr der Yokai")'
+    )
     assert isbn_lookup._cql_title("NieR:Automata") == '(tit all "NieR Automata" or tit="NieR:Automata")'
     # "Re:Zero" führt die DNB als ein Wort - dafür bleibt die Wortfolge-Suche erhalten
     assert isbn_lookup._cql_title("Re:Zero").endswith(' or tit="Re:Zero")')
@@ -322,7 +324,7 @@ def lookup_db(tmp_path, monkeypatch):
 def _cached(db_path):
     conn = sqlite3.connect(db_path)
     try:
-        return {titel: isbn for titel, isbn in conn.execute("SELECT titel, isbn FROM isbn_cache")}
+        return dict(conn.execute("SELECT titel, isbn FROM isbn_cache"))
     finally:
         conn.close()
 
@@ -474,7 +476,8 @@ def _specials_in_db(db_path):
 
 def test_normal_edition_goes_to_cache_special_editions_to_own_table(lookup_db, monkeypatch):
     results = {
-        "Alpha": ("9783753945811", "dnb (band+verlag)", [isbn_lookup.Sonderausgabe("9783759314086", "Alpha 2 Limited")]),
+        "Alpha": ("9783753945811", "dnb (band+verlag)",
+                  [isbn_lookup.Sonderausgabe("9783759314086", "Alpha 2 Limited")]),
         "Beta": (None, "keine", [isbn_lookup.Sonderausgabe("9783759332653", "Beta 3 im Schuber")]),
         "Gamma": ("9783551795274", "dnb (band+verlag)", []),
     }
@@ -498,7 +501,8 @@ def test_normal_edition_goes_to_cache_special_editions_to_own_table(lookup_db, m
 
 def test_bestellliste_shows_special_editions_and_marks_band_with_both(lookup_db, monkeypatch):
     results = {
-        "Alpha": ("9783753945811", "dnb (band+verlag)", [isbn_lookup.Sonderausgabe("9783759314086", "Alpha | 2 Limited")]),
+        "Alpha": ("9783753945811", "dnb (band+verlag)",
+                  [isbn_lookup.Sonderausgabe("9783759314086", "Alpha | 2 Limited")]),
         "Beta": (None, "keine", [isbn_lookup.Sonderausgabe("9783759332653", "Beta 3 im Schuber")]),
         "Gamma": ("9783551795274", "dnb (band+verlag)", []),
     }
@@ -530,8 +534,11 @@ def test_special_editions_are_kept_if_entered_publisher_is_not_among_results(fak
 
 def test_lookup_uses_unsaved_buffer_entries_instead_of_database(lookup_db, monkeypatch):
     seen = []
-    monkeypatch.setattr(isbn_lookup, "lookup_isbn",
-                        lambda titel, band, *a, **k: seen.append((titel, band)) or ("9783753945811", "dnb (band+verlag)", []))
+    def lookup(titel, band, *args, **kwargs):
+        seen.append((titel, band))
+        return "9783753945811", "dnb (band+verlag)", []
+
+    monkeypatch.setattr(isbn_lookup, "lookup_isbn", lookup)
     # im Zwischenspeicher umbenannt und hochgezählt, aber noch nicht gespeichert
     entries = [{"id": -1, "titel": "Neu im Puffer", "baende_bis": "4", "voe_1": "TBA"}]
 

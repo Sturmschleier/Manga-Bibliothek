@@ -7,12 +7,13 @@ verständlich ist.
 """
 
 import csv
+from typing import Optional
 
 import config
 import database as db
 
 
-def export_csv(path: str, entries, delimiter: str = None) -> int:
+def export_csv(path: str, entries, delimiter: Optional[str] = None) -> int:
     """
     Schreibt `entries` (Liste von Dicts wie im Speicher-Puffer) als
     CSV-Datei nach `path`, in den database.COLUMN_NAMES-Spalten.

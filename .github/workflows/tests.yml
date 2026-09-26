@@ -1,7 +1,8 @@
 # Automatische Tests (CI): führt bei jedem Push auf main und bei jedem Pull
-# Request die pytest-Suite auf einem frischen Windows-Rechner aus - mit der
-# ältesten laut README unterstützten Python-Version und einer aktuellen.
-# Das Ergebnis erscheint im Pull Request als grüner Haken bzw. rotes Kreuz.
+# Request den Linter Ruff sowie die pytest-Suite auf einem frischen
+# Windows-Rechner aus - mit der ältesten laut README unterstützten
+# Python-Version und einer aktuellen. Das Ergebnis erscheint im Pull Request
+# als grüner Haken bzw. rotes Kreuz, Ruff-Funde direkt an der Codezeile.
 name: Tests
 
 on:
@@ -19,6 +20,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ruff:
+    name: Ruff (Linter)
+    runs-on: ubuntu-latest   # Ruff prüft nur den Quelltext - Linux ist hier schneller
+    timeout-minutes: 5
+    steps:
+      - name: Code auschecken
+        uses: actions/checkout@v5
+
+      - name: Python einrichten
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Ruff installieren (Version aus requirements-dev.txt)
+        run: python -m pip install "$(grep -E '^ruff==' requirements-dev.txt)"
+
+      - name: Ruff ausführen
+        run: python -m ruff check --output-format=github .
+
   pytest:
     name: pytest (Windows, Python ${{ matrix.python-version }})
     runs-on: windows-latest

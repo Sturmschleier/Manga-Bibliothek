@@ -19,6 +19,7 @@ from datetime import datetime
 from email import policy
 from email.parser import BytesParser
 from html.parser import HTMLParser
+
 from logic import parse_int
 
 _PRICE_RE = re.compile(r"^\d[\d.,]*\s*(EUR|€)$", re.IGNORECASE)
@@ -69,7 +70,8 @@ class _RowCollector(HTMLParser):
             self.rows.append(self._row)
             self._row = None
         elif tag == "table":
-            self.rows.append([])  # Tabellenende als Trennmarke (verschachtelte Tabellen verlieren sonst ihre Zeilengrenzen)
+            # Tabellenende als Trennmarke (verschachtelte Tabellen verlieren sonst ihre Zeilengrenzen)
+            self.rows.append([])
 
     def handle_data(self, data):
         if self._cell is not None:
@@ -99,7 +101,7 @@ def parse_message_bytes(raw: bytes) -> list[OrderItem]:
         return parse_html(body.get_content())
     except ValueError:
         raise
-    except Exception as exc:  # noqa: BLE001 - fremde Mail-Inhalte: jeder Fehler = "nicht lesbar"
+    except Exception as exc:
         raise ValueError(f"Die E-Mail konnte nicht gelesen werden ({type(exc).__name__}: {exc}).") from exc
 
 
@@ -279,7 +281,10 @@ def build_log(source, mail_count, items, matches, new_matches, already_owned, un
     lines += section("Bereits markiert (unverändert)", [match_row(m) for m in already_marked])
     lines += section(
         "Bereits im Bestand (nicht markiert)",
-        [f"  {m.entry.get('titel')} | Band {m.band} | Bände (bis) = {m.entry.get('baende_bis')}" for m in already_owned],
+        [
+            f"  {m.entry.get('titel')} | Band {m.band} | Bände (bis) = {m.entry.get('baende_bis')}"
+            for m in already_owned
+        ],
     )
     if problems:
         lines += section("Nicht lesbare Dateien", [f"  {p}" for p in problems])

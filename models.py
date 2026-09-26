@@ -17,7 +17,7 @@ Code kann Werk direkt verwenden, z.B.:
     werk.to_dict()    # zurück zu einem normalen Dict, z.B. für db.replace_all()
 """
 
-from dataclasses import dataclass, field, fields, make_dataclass
+from dataclasses import field, fields, make_dataclass
 from typing import Optional
 
 import database as db
@@ -34,7 +34,7 @@ class _DictLikeMixin:
         try:
             return getattr(self, key)
         except AttributeError:
-            raise KeyError(key)
+            raise KeyError(key) from None
 
     def __setitem__(self, key, value):
         setattr(self, key, value)

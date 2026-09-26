@@ -214,10 +214,9 @@ def replace_all(entries):
     cols = ", ".join(STORED_COLUMN_NAMES)
     placeholders = ", ".join("?" for _ in STORED_COLUMN_NAMES)
     rows = [[entry.get(c, "") or "" for c in STORED_COLUMN_NAMES] for entry in entries]
-    with closing(get_connection()) as conn:
-        with conn:  # commit bei Erfolg, rollback bei einer Ausnahme
-            conn.execute("DELETE FROM werke")
-            conn.executemany(f"INSERT INTO werke ({cols}) VALUES ({placeholders})", rows)
+    with closing(get_connection()) as conn, conn:  # commit bei Erfolg, rollback bei einer Ausnahme
+        conn.execute("DELETE FROM werke")
+        conn.executemany(f"INSERT INTO werke ({cols}) VALUES ({placeholders})", rows)
     return load_all()
 
 
@@ -230,7 +229,7 @@ def backup_dir():
     return DB_FILE.parent / BACKUP_DIR_NAME
 
 
-def create_backup(reason: str, keep: int = None):
+def create_backup(reason: str, keep: Optional[int] = None):
     """
     Legt eine Kopie der aktuellen Datenbankdatei als
     BACKUP/manga_library_<Datum>_<Uhrzeit>_<reason>.db an und räumt danach

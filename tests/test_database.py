@@ -63,7 +63,7 @@ def test_fresh_database_needs_no_backup(tmp_path, monkeypatch):
     db.init_db()
 
     assert not (tmp_path / "manga_library.db.vor-schema-v2.bak").exists()
-    assert [e for e in db.load_all()] == []
+    assert db.load_all() == []
 
 
 def test_hidden_column_bestellt_is_stored_but_not_a_visible_column(tmp_path, monkeypatch):

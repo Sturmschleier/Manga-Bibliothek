@@ -685,7 +685,9 @@ mangalib/
 ├── tests/              Automatisierte Tests (pytest)
 ├── build.bat            PyInstaller-Buildskript (Windows) für die exe
 ├── requirements.txt    Python-Laufzeit-Abhängigkeiten
-├── requirements-dev.txt Zusätzlich für Tests: pytest
+├── requirements-dev.txt Zusätzlich für Entwicklung: pytest, Ruff (Linter)
+├── pyproject.toml      Konfiguration des Linters Ruff
+├── .github/workflows/  Automatische Tests auf GitHub (CI)
 └── Manga - Besitz.csv  Deine ursprüngliche Liste (nur lokal, nicht im Repo)
 ```
 
@@ -709,12 +711,28 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
+**Linter (Ruff):** prüft den Quelltext auf echte Fehler (z. B. ungenutzte
+Importe, undefinierte Namen), typische Fallstricke, pauschale
+`except Exception` ohne Begründung, Import-Reihenfolge und Zeilenlänge (120
+Zeichen). Welche Regeln gelten, steht in `pyproject.toml`; bewusst
+ausgenommen sind z. B. die deutschen Anführungszeichen „…“ in Texten.
+
+```
+python -m ruff check .          # prüfen
+python -m ruff check . --fix    # automatisch Behebbares gleich korrigieren
+```
+
+Die Ruff-Version ist in `requirements-dev.txt` fest vorgegeben, damit neue
+Regeln einer neueren Version nicht unbemerkt Fehler melden – beim Anheben
+einmal `ruff check .` laufen lassen.
+
 **Automatisch auf GitHub (CI):** Bei jedem Push auf `main` und bei jedem
-Pull Request führt GitHub Actions die Tests auf einem frischen
-Windows-Rechner aus – mit Python 3.9 (älteste unterstützte Version) und
-3.14 (`.github/workflows/tests.yml`). Das Ergebnis steht im Pull Request
-(grüner Haken bzw. rotes Kreuz) und als Abzeichen oben in dieser README;
-über den Reiter „Actions“ lässt sich ein Durchlauf auch von Hand starten.
+Pull Request führt GitHub Actions zuerst Ruff aus und dann die Tests auf
+einem frischen Windows-Rechner – mit Python 3.9 (älteste unterstützte
+Version) und 3.14 (`.github/workflows/tests.yml`). Das Ergebnis steht im
+Pull Request (grüner Haken bzw. rotes Kreuz, Ruff-Funde direkt an der
+betroffenen Codezeile) und als Abzeichen oben in dieser README; über den
+Reiter „Actions“ lässt sich ein Durchlauf auch von Hand starten.
 
 ## Formales Datenmodell (models.py)
 

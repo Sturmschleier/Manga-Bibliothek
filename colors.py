@@ -10,6 +10,7 @@ Erzeugt die Farben für die Tabellenansicht:
 """
 
 import hashlib
+from typing import Optional
 
 # Helle, aber gut lesbare Statusfarben für die Spalte "VÖ +1"
 VOE1_STATUS_COLORS = {
@@ -122,7 +123,7 @@ def zebra_color(row_index: int):
     return ZEBRA_EVEN if row_index % 2 == 0 else ZEBRA_ODD
 
 
-def cell_background(column: str, value: str, row_index: int, enabled: dict = None):
+def cell_background(column: str, value: str, row_index: int, enabled: Optional[dict] = None):
     """
     Bestimmt die Hintergrundfarbe für eine einzelne Zelle.
 

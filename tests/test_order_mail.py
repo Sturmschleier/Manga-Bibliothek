@@ -120,7 +120,8 @@ def test_parse_pickup_mail_reads_article_table_once_and_strips_ean():
 
 def test_order_confirmation_is_not_treated_as_pickup():
     # auch wenn im Mailtext "abholbereit"/"Abholung" vorkommt: Preise => Bestellbestätigung
-    html = _html(("Sanda - Band 12", 1, "9,00 EUR")).replace("<table>", "<p>Sobald Ihre Bestellung abholbereit ist ... zur Abholung bereit</p><table>", 1)
+    note = "<p>Sobald Ihre Bestellung abholbereit ist ... zur Abholung bereit</p>"
+    html = _html(("Sanda - Band 12", 1, "9,00 EUR")).replace("<table>", note + "<table>", 1)
     items = order_mail.parse_html(html)
     assert [i.kind for i in items] == [order_mail.KIND_ORDER]
 

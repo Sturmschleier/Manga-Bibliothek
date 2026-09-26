@@ -11,9 +11,9 @@ import pytest
 
 pytest.importorskip("googleapiclient")
 
-import config  # noqa: E402
-import database as db  # noqa: E402
-import drive_sync  # noqa: E402
+import config
+import database as db
+import drive_sync
 
 
 class _FakeDownloader:

@@ -7,9 +7,19 @@ MailSelectDialog (gefundene Bestellmails auswählen).
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QFormLayout, QHBoxLayout, QLabel,
-    QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton,
-    QSpinBox, QVBoxLayout,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QPushButton,
+    QSpinBox,
+    QVBoxLayout,
 )
 
 import mail_fetch
@@ -70,7 +80,9 @@ class MailSettingsDialog(QDialog):
         self.save_pw_box.setChecked(has_saved)
         if not mail_fetch.keyring_available():
             self.save_pw_box.setEnabled(False)
-            self.save_pw_box.setToolTip("Nicht verfügbar (Paket „keyring“ fehlt) – das Passwort wird dann bei jedem Abruf erfragt.")
+            self.save_pw_box.setToolTip(
+                "Nicht verfügbar (Paket „keyring“ fehlt) – das Passwort wird dann bei jedem Abruf erfragt."
+            )
         form.addRow("", self.save_pw_box)
 
         hint = QLabel(
