@@ -5,14 +5,92 @@ Puffer-Eintrag (Dict) arbeitet – ohne Datenbankzugriff. So bleiben
 Änderungen im Speicher, bis sie aktiv gespeichert werden.
 """
 
+import re
 from typing import Optional, Union
+
+from database import VOE_COLUMNS
+import sorting
 
 # Sentinel-Rückgabewert von increment_gelesen(), siehe dort. Als benannte
 # Konstante statt eines an mehreren Stellen wiederholten "Magic String".
 EXCEEDS = "exceeds"
 
-# Die VÖ-Spalten, die beim "+1" nach vorn rücken (Reihenfolge = Zeitplan).
-VOE_KEYS = ("voe_1", "voe_2", "voe_3")
+# Bestellt-/Angekommen-Markierungen (siehe order_mail.FLAG_FIELD): Wert ist
+# die Bandnummer, für die die Markierung gilt.
+MARK_FIELDS = ("bestellt", "angekommen")
+
+
+def parse_int(value) -> Optional[int]:
+    """Ganze Zahl aus einem Feldwert (Text wie "12", " 7 "), sonst None -
+    für "Bände (bis)", "Gelesen bis" und die Markierungen."""
+    try:
+        return int(str(value if value is not None else "").strip())
+    except ValueError:
+        return None
+
+
+# Sieht aus wie ein Datum (nur Ziffern und Punkte), z.B. "15.13.2026"
+_DATE_LIKE_RE = re.compile(r"^[\d.]+$")
+_DATE_FIELDS = ("zugang",) + tuple(VOE_COLUMNS)
+
+
+def validate_entry(values: dict, other_titles=()) -> list[str]:
+    """
+    Prüft die Werte aus dem Bearbeiten-Formular und gibt verständliche
+    Fehlermeldungen zurück (leere Liste = alles in Ordnung):
+      - Titel ist Pflicht und darf nicht schon vorkommen (`other_titles`:
+        klein geschriebene Titel aller ANDEREN Einträge) - doppelte Titel
+        würden ISBN-Zwischenspeicher und Bestellzuordnung durcheinanderbringen
+      - "Bände (bis)" und "Gelesen bis" sind leer oder ganze Zahlen,
+        "Gelesen bis" nicht größer als "Bände (bis)"
+      - Datumswerte (Zugang, VÖ) sind TT.MM.JJJJ oder MM.JJJJ; Freitext wie
+        "TBA" oder "Band 17 11.06.2025" bleibt erlaubt
+    """
+    problems = []
+    titel = (values.get("titel") or "").strip()
+    if not titel:
+        problems.append("Bitte einen Titel angeben.")
+    elif titel.casefold() in other_titles:
+        problems.append(f"Den Titel „{titel}“ gibt es bereits.")
+
+    numbers = {}
+    for key, label in (("baende_bis", "Bände (bis)"), ("gelesen_bis", "Gelesen bis")):
+        raw = (values.get(key) or "").strip()
+        numbers[key] = parse_int(raw)
+        if raw and numbers[key] is None:
+            problems.append(f"„{label}“ muss eine ganze Zahl sein (ist: „{raw}“).")
+    if (numbers["baende_bis"] is not None and numbers["gelesen_bis"] is not None
+            and numbers["gelesen_bis"] > numbers["baende_bis"]):
+        problems.append("„Gelesen bis“ kann nicht größer als „Bände (bis)“ sein.")
+
+    for key in _DATE_FIELDS:
+        raw = (values.get(key) or "").strip()
+        if raw and _DATE_LIKE_RE.match(raw) and sorting.parse_date(raw) is None:
+            problems.append(f"„{raw}“ ist kein gültiges Datum (TT.MM.JJJJ oder MM.JJJJ).")
+    return problems
+
+
+def clear_fulfilled_marks(entry: dict) -> bool:
+    """
+    Entfernt Bestellt-/Angekommen-Markierungen, deren Band inzwischen im
+    Bestand ist ("Bände (bis)" >= markierter Band) - z.B. nach "+1" oder
+    nach dem Hochsetzen der Bände im Bearbeiten-Formular. Ist Band 14
+    bestellt und "Bände (bis)" steigt nur auf 13, bleibt die Markierung.
+
+    Lässt sich eine der beiden Zahlen nicht lesen, bleibt die Markierung
+    unverändert. Verändert `entry` in place; gibt True zurück, wenn
+    mindestens eine Markierung entfernt wurde.
+    """
+    owned = parse_int(entry.get("baende_bis"))
+    if owned is None:
+        return False
+    changed = False
+    for field_name in MARK_FIELDS:
+        band = parse_int(entry.get(field_name))
+        if band is not None and owned >= band:
+            entry[field_name] = ""
+            changed = True
+    return changed
 
 
 def increment_baende(entry: dict) -> Optional[int]:
@@ -31,27 +109,23 @@ def increment_baende(entry: dict) -> Optional[int]:
     None, falls "Bände (bis)" keine gültige Zahl enthält (entry bleibt in
     diesem Fall unverändert).
     """
-    try:
-        new_baende = int((entry.get("baende_bis") or "0").strip()) + 1
-    except ValueError:
+    current = parse_int(entry.get("baende_bis") or "0")   # leer zählt als 0
+    if current is None:
         return None
+    new_baende = current + 1
 
     entry["baende_bis"] = str(new_baende)
 
     if (entry.get("voe_1") or "").strip().lower() != "fortlaufend":
-        voe_values = [entry.get(f"voe_{i}") or "" for i in range(1, len(VOE_KEYS) + 1)]
+        voe_values = [entry.get(key) or "" for key in VOE_COLUMNS]
         shifted = voe_values[1:] + [""]
         if not any(v.strip() for v in shifted):
             shifted[0] = "NA"
-        for i in range(len(VOE_KEYS)):
-            entry[f"voe_{i + 1}"] = shifted[i]
+        for key, value in zip(VOE_COLUMNS, shifted):
+            entry[key] = value
 
-    # Altlasten-Kompatibilität: frühere Programmversionen legten eine
-    # transiente "isbn"-Spalte direkt in `werke` an und der Puffer konnte
-    # sie dadurch (via SELECT *) enthalten. Seit der isbn_cache-Tabelle
-    # (siehe isbn_lookup.py) betrifft das nur noch Alt-Datenbanken - ist
-    # der Schlüssel trotzdem vorhanden, wird er hier weiterhin geleert,
-    # da er sich ohnehin nur auf den alten Band-Stand bezogen hätte.
+    # Alte Datenbanken können noch eine "isbn"-Spalte in `werke` haben (heute
+    # steht die ISBN in isbn_cache): sie gilt nur für den bisherigen Band.
     if "isbn" in entry:
         entry["isbn"] = ""
 
@@ -72,19 +146,14 @@ def increment_gelesen(entry: dict) -> Union[int, str, None]:
         "Bände (bis)" selbst keine gültige Zahl (oder leer), wird nicht
         geprüft (kein Vergleich möglich).
     """
-    try:
-        new_value = int((entry.get("gelesen_bis") or "0").strip()) + 1
-    except ValueError:
+    current = parse_int(entry.get("gelesen_bis") or "0")   # leer zählt als 0
+    if current is None:
         return None
+    new_value = current + 1
 
-    baende_raw = (entry.get("baende_bis") or "").strip()
-    if baende_raw:
-        try:
-            baende_value = int(baende_raw)
-        except ValueError:
-            baende_value = None
-        if baende_value is not None and new_value > baende_value:
-            return EXCEEDS
+    baende_value = parse_int(entry.get("baende_bis"))
+    if baende_value is not None and new_value > baende_value:
+        return EXCEEDS
 
     entry["gelesen_bis"] = str(new_value)
     return new_value

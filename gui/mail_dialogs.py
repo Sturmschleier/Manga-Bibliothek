@@ -1,15 +1,11 @@
 """
 gui/mail_dialogs.py
 Dialoge für den Postfach-Abruf von Bestellbestätigungen (siehe
-mail_fetch.py): MailSettingsDialog (IMAP-Zugang, anbieterunabhängig),
-MailSelectDialog (gefundene Bestellmails auswählen) und AsyncCall (führt
-das langsame Netzwerk-Kommando in einem Hintergrund-Thread aus, damit die
-Oberfläche nicht einfriert).
+mail_fetch.py): MailSettingsDialog (IMAP-Zugang, anbieterunabhängig) und
+MailSelectDialog (gefundene Bestellmails auswählen).
 """
 
-import threading
-
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QFormLayout, QHBoxLayout, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton,
@@ -19,31 +15,9 @@ from PySide6.QtWidgets import (
 import mail_fetch
 import order_mail
 
+from .worker import AsyncCall
+
 _SECURITY_LABELS = {"ssl": "SSL/TLS (Port 993)", "starttls": "STARTTLS (Port 143)"}
-
-
-class AsyncCall(QObject):
-    """Führt `func()` in einem Hintergrund-Thread aus und meldet das Ergebnis
-    über `finished(result, error)` im Haupt-Thread (Qt stellt Signale aus
-    anderen Threads automatisch sicher zu). Das Objekt muss vom Aufrufer
-    referenziert bleiben, bis das Signal angekommen ist."""
-
-    finished = Signal(object, object)  # result, error (Exception oder None)
-
-    def __init__(self, func, parent=None):
-        super().__init__(parent)
-        self._func = func
-
-    def start(self):
-        def worker():
-            result, error = None, None
-            try:
-                result = self._func()
-            except Exception as exc:  # noqa: BLE001 - wird dem Nutzer angezeigt
-                error = exc
-            self.finished.emit(result, error)
-
-        threading.Thread(target=worker, daemon=True).start()
 
 
 class MailSettingsDialog(QDialog):
@@ -252,7 +226,10 @@ class MailSelectDialog(QDialog):
         layout.addWidget(self.list_widget, 1)
 
         if skipped:
-            note = QLabel(f"{skipped} weitere Mail(s) ohne Artikelliste (z. B. Versandmitteilungen) wurden übersprungen.")
+            note = QLabel(
+                f"{skipped} weitere Mail(s) ohne auswertbare Artikelliste (z. B. Versandmitteilungen "
+                "oder nicht lesbare Mails) wurden übersprungen."
+            )
             note.setStyleSheet("color: #666;")
             note.setWordWrap(True)
             layout.addWidget(note)

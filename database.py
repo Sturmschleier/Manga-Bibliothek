@@ -35,7 +35,8 @@ BACKUP_PREFIX = "manga_library_"
 # abbilden lassen - siehe _apply_migrations().
 #   1 = Ausgangszustand (mit VÖ +4 / VÖ +5)
 #   2 = Spalten voe_4 und voe_5 entfernt
-SCHEMA_VERSION = 2
+#   3 = bestellt/angekommen enthalten die Bandnummer statt "1"
+SCHEMA_VERSION = 3
 
 # Seit Schema-Version 2 nicht mehr Teil des Datenmodells; werden bei
 # bestehenden Datenbanken in _apply_migrations() entfernt.
@@ -60,17 +61,22 @@ COLUMNS = [
 
 COLUMN_NAMES = [c[0] for c in COLUMNS]
 
+# Die Erscheinungstermine in ihrer Reihenfolge (VÖ +1 = nächster Band) -
+# einzige Quelle für "+1" (logic.py), Sortierung (sorting.py) und die
+# Termin-Zähler der Seitenleiste (gui/constants.py).
+VOE_COLUMNS = ("voe_1", "voe_2", "voe_3")
+
 # Zusätzlich gespeicherte, aber NICHT sichtbare Felder: gehören zum
 # Eintrag (Puffer, Undo, Speichern), erscheinen aber weder als Tabellen-
 # spalte noch im Bearbeiten-Formular oder im CSV-Export/-Import.
-#   bestellt = "1", wenn der nächste Band laut Bestellbestätigung
-#              (E-Mail-Import, siehe order_mail.py) bestellt wurde - wird in
-#              der Tabelle hellblau am Titel markiert und beim "+1" auf
-#              "Bände (bis)" wieder zurückgesetzt.
-#   angekommen = "1", wenn laut Abhol-Benachrichtigung (E-Mail, siehe
-#              order_mail.py) der bestellte Band in der Buchhandlung
-#              abholbereit ist - roter Balken links an der Titelzelle;
-#              wird beim "+1" auf "Bände (bis)" ebenfalls zurückgesetzt.
+#   bestellt = Bandnummer (z.B. "14"), wenn dieser Band laut Bestell-
+#              bestätigung (E-Mail-Import, siehe order_mail.py) bestellt
+#              wurde - wird in der Tabelle hellblau am Titel markiert.
+#   angekommen = Bandnummer, wenn dieser Band laut Abhol-Benachrichtigung
+#              (E-Mail, siehe order_mail.py) in der Buchhandlung abholbereit
+#              ist - roter Balken links an der Titelzelle.
+#   Beide entfallen, sobald "Bände (bis)" den markierten Band erreicht
+#   (siehe logic.clear_fulfilled_marks).
 HIDDEN_COLUMNS = [
     ("bestellt", "TEXT"),
     ("angekommen", "TEXT"),
@@ -125,40 +131,62 @@ def _apply_migrations(conn, current_version: int) -> None:
                 conn.execute(f"ALTER TABLE werke DROP COLUMN {col}")
             conn.commit()
 
+    if current_version < 3:
+        _migrate_marks_to_band_numbers(conn)
+
+
+def _migrate_marks_to_band_numbers(conn) -> None:
+    """
+    Version 3: bestellt/angekommen enthielten bisher nur "1" (= "der
+    nächste Band"). Da eine solche Markierung bei jedem "+1" entfernt
+    wurde, meinte sie immer genau Bände (bis) + 1 - diese Bandnummer wird
+    jetzt eingetragen. Ist "Bände (bis)" keine Zahl, bleibt der Wert stehen.
+    """
+    rows = conn.execute(
+        "SELECT id, baende_bis, bestellt, angekommen FROM werke WHERE bestellt = '1' OR angekommen = '1'"
+    ).fetchall()
+    for row_id, baende_bis, bestellt, angekommen in rows:
+        try:
+            next_band = str(int((baende_bis or "").strip()) + 1)
+        except ValueError:
+            continue
+        conn.execute(
+            "UPDATE werke SET bestellt = ?, angekommen = ? WHERE id = ?",
+            (
+                next_band if bestellt == "1" else bestellt,
+                next_band if angekommen == "1" else angekommen,
+                row_id,
+            ),
+        )
+    conn.commit()
+
 
 def init_db():
-    conn = get_connection()
-    cols_sql = ",\n".join(f"{name} {ctype}" for name, ctype in STORED_COLUMNS)
-    conn.execute(
-        f"""
-        CREATE TABLE IF NOT EXISTS werke (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            {cols_sql}
+    with closing(get_connection()) as conn:
+        cols_sql = ",\n".join(f"{name} {ctype}" for name, ctype in STORED_COLUMNS)
+        conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS werke (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                {cols_sql}
+            )
+            """
         )
-        """
-    )
-    conn.commit()
-
-    # Migration: fehlende Spalten bei bereits bestehenden Datenbanken ergänzen,
-    # falls sich COLUMNS künftig einmal erweitert. CREATE TABLE IF NOT EXISTS
-    # ändert eine bereits vorhandene Tabelle nicht.
-    # (Die "isbn"-Spalte für den ISBN-Abgleich wird bewusst NICHT hier verwaltet,
-    # sondern eigenständig von isbn_lookup.py - sie ist kein Teil des normalen
-    # Datenmodells/Puffers, da sie sich mit jedem Band ändert und beim
-    # Speichern nicht dauerhaft mitgeführt werden muss.)
-    existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(werke)").fetchall()}
-    for name, ctype in STORED_COLUMNS:
-        if name not in existing_cols:
-            conn.execute(f"ALTER TABLE werke ADD COLUMN {name} {ctype}")
-    conn.commit()
-
-    current_version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if current_version < SCHEMA_VERSION:
-        _apply_migrations(conn, current_version)
-        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         conn.commit()
 
-    conn.close()
+        # Fehlende Spalten bei bestehenden Datenbanken ergänzen - CREATE TABLE
+        # IF NOT EXISTS ändert eine vorhandene Tabelle nicht.
+        existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(werke)").fetchall()}
+        for name, ctype in STORED_COLUMNS:
+            if name not in existing_cols:
+                conn.execute(f"ALTER TABLE werke ADD COLUMN {name} {ctype}")
+        conn.commit()
+
+        current_version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if current_version < SCHEMA_VERSION:
+            _apply_migrations(conn, current_version)
+            conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            conn.commit()
 
 
 def load_all():

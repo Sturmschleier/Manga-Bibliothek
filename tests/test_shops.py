@@ -72,3 +72,8 @@ def test_bestellliste_links_to_selected_shop(tmp_path, monkeypatch):
     thalia = isbn_lookup.bestellliste_markdown(str(db_file), 9, 2026)
     assert "Buchhändler: Thalia" in thalia
     assert "https://www.thalia.de/suche?sq=9783551795274" in thalia
+
+
+def test_other_braces_in_template_do_not_break_links():
+    config.set_value("isbn_shop_url_template", "https://shop.example/{isbn}?utm={quelle}")
+    assert shops.order_url("123") == "https://shop.example/123?utm={quelle}"

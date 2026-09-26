@@ -1,10 +1,12 @@
 """
 gui/main_window.py
-Hauptfenster (MangaLibraryApp): Speicher-Puffer, Undo/Redo, Menüleiste
-(Datei), Toolbar, Filter, Tabelle, Seitenleiste, Live-Log, ISBN-Abgleich-Steuerung.
+Hauptfenster (MangaLibraryApp): Menüleiste, Toolbar, Filter, Tabelle,
+Seitenleiste, Live-Log sowie die Steuerung von Speichern, Import/Export,
+Google Drive, Bestell-Mails und ISBN-Abgleich.
 
 Wichtig: Alle Änderungen (neuer Eintrag, Bearbeiten, Löschen, +1-Buttons,
-CSV-Import) wirken zunächst nur auf einen Puffer im Speicher (self.data).
+CSV-Import) wirken zunächst nur auf den Zwischenspeicher (self.buffer, siehe
+library.LibraryBuffer - dort liegt auch Rückgängig/Wiederholen).
 Erst ein Klick auf "💾 Speichern" schreibt den kompletten Bestand in die
 lokale Datenbank. Solange ungespeicherte Änderungen bestehen, zeigen
 Fenstertitel und Statuszeile das deutlich an; beim Schließen des Fensters
@@ -16,14 +18,15 @@ Aufwand ("virtualisiert") - unabhängig von der Gesamtgröße der Sammlung.
 """
 
 import copy
+import csv
 import os
 import threading
 from datetime import date
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QComboBox, QFileDialog, QFrame,
+    QAbstractItemView, QComboBox, QFileDialog, QFrame,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QMainWindow, QMenu,
     QInputDialog, QMessageBox, QPlainTextEdit, QProgressDialog, QPushButton, QSizePolicy,
     QSplitter, QTableView, QVBoxLayout, QWidget,
@@ -39,16 +42,20 @@ import logic
 import mail_fetch
 import order_mail
 import sorting
+from library import LibraryBuffer
 
 from .constants import (
     APP_TITLE, COL_DEFAULT_WIDTHS, DISPLAY_COLUMNS, DISPLAY_LABELS,
-    INCREMENTABLE_COLUMNS, MAX_UNDO_STEPS, ROW_ID_ROLE, RUCKSTAND_COLUMN,
+    INCREMENTABLE_COLUMNS, ROW_ID_ROLE, RUCKSTAND_COLUMN,
     VOE1_FILTER_OPTIONS, _entry_voe_dates, _ruckstand_value, _voe1_category,
 )
 from .dialogs import ConfigDialog, EntryDialog, IsbnLookupDialog
-from .isbn_view import IsbnResultWindow, IsbnWorkerSignals
-from .mail_dialogs import AsyncCall, MailSelectDialog, MailSettingsDialog
+from .isbn_view import IsbnResultWindow
+from .mail_dialogs import MailSelectDialog, MailSettingsDialog
 from .table import CellDelegate, MangaTableModel
+from .worker import AsyncCall
+
+SEARCH_DELAY_MS = 200  # Suche erst nach kurzer Tipp-Pause auswerten
 
 class MangaLibraryApp(QMainWindow):
     def __init__(self):
@@ -56,6 +63,7 @@ class MangaLibraryApp(QMainWindow):
         self.setWindowTitle(APP_TITLE)
         self.resize(1450, 780)
 
+        config_problem = config.problem()   # beschädigte config.json -> Hinweis nach dem Start
         config.ensure_file_exists()
         changelog.archive_old_entries()
         changelog.prune_isbn_logs()
@@ -63,20 +71,15 @@ class MangaLibraryApp(QMainWindow):
 
         db.init_db()
 
-        self.data = db.load_all()   # Speicher-Puffer: Liste von Dicts
-        self.dirty = False
-        self.next_temp_id = -1      # negative IDs für noch nicht gespeicherte, neue Einträge
-
-        self._clean_snapshot = copy.deepcopy(self.data)  # Stand des letzten Ladens/Speicherns (für "dirty" & Undo)
-        self.undo_stack = []
-        self.redo_stack = []
-        self._pending_redo_backup = None  # siehe _push_undo_snapshot/_discard_pending_snapshot
+        self.buffer = LibraryBuffer(db.load_all())   # Zwischenspeicher bis "Speichern"
 
         self.sort_column = "titel"
         self.sort_reverse = False
         self.selected_row_id = None
         self._mail_session_passwords = {}  # nur im Arbeitsspeicher, nie auf Platte
         self._mail_call = None
+        self._drive_call = None
+        self._isbn_call = None
         self.setAcceptDrops(True)  # .eml-Dateien per Drag & Drop einlesen
 
         central = QWidget()
@@ -98,6 +101,14 @@ class MangaLibraryApp(QMainWindow):
 
         self._autosize_titel_column()  # einmalig für den initial geladenen Bestand
         self.refresh()
+
+        if config_problem:
+            QTimer.singleShot(0, lambda: QMessageBox.warning(
+                self, "Konfiguration",
+                f"Die Datei config.json ist beschädigt ({config_problem}).\n\n"
+                "Es gelten vorerst die Standardwerte. Sobald eine Einstellung geändert wird, "
+                "wird die beschädigte Datei als config.json.defekt aufbewahrt.",
+            ))
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -140,97 +151,52 @@ class MangaLibraryApp(QMainWindow):
         self.live_log_view.verticalScrollBar().setValue(self.live_log_view.verticalScrollBar().maximum())
 
 
-    def _mark_dirty(self):
-        """Prüft, ob sich der Puffer vom zuletzt geladenen/gespeicherten
-        Stand unterscheidet - statt einfach nur ein Flag zu setzen. So
-        verschwindet der "ungespeicherte Änderungen"-Hinweis auch korrekt
-        wieder, wenn man z.B. per Rückgängig exakt zum gespeicherten Stand
-        zurückkehrt."""
-        self.dirty = (self.data != self._clean_snapshot)
+    @property
+    def data(self):
+        """Die Einträge im Zwischenspeicher (siehe library.LibraryBuffer)."""
+        return self.buffer.data
+
+    @property
+    def dirty(self) -> bool:
+        return self.buffer.dirty
+
+    def _after_change(self, autosize: bool = False):
+        """Nach jeder Änderung am Zwischenspeicher: Fenstertitel ("*"),
+        Rückgängig-/Wiederholen-Knöpfe und Anzeige aktualisieren."""
         self._update_title()
+        self._update_undo_redo_actions()
+        if autosize:
+            self._autosize_titel_column()
+        self.refresh()
 
     def _update_title(self):
         self.setWindowTitle(APP_TITLE + (" *" if self.dirty else ""))
 
     def _find_entry(self, row_id):
-        for entry in self.data:
-            if entry["id"] == row_id:
-                return entry
-        return None
+        return self.buffer.find(row_id)
 
     def _distinct_values(self, column):
-        values = {(e.get(column) or "").strip() for e in self.data}
-        values.discard("")
-        return sorted(values, key=str.lower)
+        return self.buffer.distinct_values(column)
 
     # ------------------------------------------------------- Undo/Redo
 
-    def _push_undo_snapshot(self):
-        """
-        Vor jeder GEPLANTEN puffer-verändernden Aktion aufzurufen: merkt
-        sich den Stand VOR der Änderung für "Rückgängig".
-
-        Löscht die "Wiederholen"-Historie bewusst NOCH NICHT - das
-        passiert erst in `_commit_pending_action()`, sobald die Aktion
-        tatsächlich stattgefunden hat. Bricht die Aktion stattdessen ab
-        (z.B. ungültige Eingabe, geblockte "+1"-Erhöhung, leerer
-        CSV-Import), `_discard_pending_snapshot()` aufrufen - dann bleibt
-        eine zuvor vorhandene "Wiederholen"-Historie unangetastet, statt
-        grundlos verworfen zu werden.
-        """
-        self._pending_redo_backup = list(self.redo_stack)
-        self.undo_stack.append((copy.deepcopy(self.data), self.next_temp_id))
-        if len(self.undo_stack) > MAX_UNDO_STEPS:
-            self.undo_stack.pop(0)
-        self._update_undo_redo_actions()
-
-    def _commit_pending_action(self):
-        """Nach einer ERFOLGREICHEN, per `_push_undo_snapshot()` vorbereiteten
-        Änderung aufzurufen: verwirft jetzt tatsächlich die "Wiederholen"-
-        Historie (eine neue Aktion macht die alte Zukunft ungültig)."""
-        self.redo_stack.clear()
-        self._pending_redo_backup = None
-        self._update_undo_redo_actions()
-
-    def _discard_pending_snapshot(self):
-        """Nach einer FEHLGESCHLAGENEN/abgebrochenen, per
-        `_push_undo_snapshot()` vorbereiteten Aktion aufzurufen: verwirft
-        den zuvor gemerkten Stand wieder, ohne die "Wiederholen"-Historie
-        anzutasten."""
-        if self.undo_stack:
-            self.undo_stack.pop()
-        if self._pending_redo_backup is not None:
-            self.redo_stack = self._pending_redo_backup
-            self._pending_redo_backup = None
-        self._update_undo_redo_actions()
-
     def _update_undo_redo_actions(self):
-        self.undo_btn.setEnabled(bool(self.undo_stack))
-        self.redo_btn.setEnabled(bool(self.redo_stack))
+        self.undo_btn.setEnabled(self.buffer.can_undo)
+        self.redo_btn.setEnabled(self.buffer.can_redo)
 
     def undo(self):
-        if not self.undo_stack:
+        if not self.buffer.undo():
             return
-        self.redo_stack.append((copy.deepcopy(self.data), self.next_temp_id))
-        self.data, self.next_temp_id = self.undo_stack.pop()
         self.selected_row_id = None
-        self._mark_dirty()
-        self._update_undo_redo_actions()
-        self._autosize_titel_column()
-        self.refresh()
+        self._after_change(autosize=True)
         self.statusBar().showMessage("Rückgängig gemacht.", 3000)
         self._log("Rückgängig gemacht.")
 
     def redo(self):
-        if not self.redo_stack:
+        if not self.buffer.redo():
             return
-        self.undo_stack.append((copy.deepcopy(self.data), self.next_temp_id))
-        self.data, self.next_temp_id = self.redo_stack.pop()
         self.selected_row_id = None
-        self._mark_dirty()
-        self._update_undo_redo_actions()
-        self._autosize_titel_column()
-        self.refresh()
+        self._after_change(autosize=True)
         self.statusBar().showMessage("Wiederholt.", 3000)
         self._log("Wiederholt.")
 
@@ -268,9 +234,7 @@ class MangaLibraryApp(QMainWindow):
                 "Virenscanner). Bitte später erneut speichern.",
             )
             return False
-        self.data = saved
-        self._clean_snapshot = copy.deepcopy(self.data)
-        self.dirty = False
+        self.buffer.mark_saved(saved)
         self.selected_row_id = None
         self._update_title()
         self.refresh()
@@ -302,8 +266,7 @@ class MangaLibraryApp(QMainWindow):
     def _build_menu_bar(self):
         """Menüleiste: "Datei" (Eintrags-Verwaltung, CSV-Import/-Export,
         Google-Drive-Download) und "Konfigurieren" (Farbcodierung,
-        Konfiguration, Anzeige-/Berechnungsoptionen) - früher einzelne
-        Buttons/Checkboxen in Toolbar und Filterleiste."""
+        Konfiguration, Anzeige-/Berechnungsoptionen)."""
         file_menu = self.menuBar().addMenu("&Datei")
 
         add_action = file_menu.addAction("Neuer Eintrag")
@@ -366,7 +329,7 @@ class MangaLibraryApp(QMainWindow):
 
         self.follow_selection_action = config_menu.addAction("Nach Bearbeitung zur Zeile springen")
         self.follow_selection_action.setCheckable(True)
-        self.follow_selection_action.setChecked(config.get("follow_selection_after_edit", True))
+        self.follow_selection_action.setChecked(config.get_bool("follow_selection_after_edit"))
         self.follow_selection_action.setToolTip(
             "Wenn aktiv: springt die Ansicht nach dem Bearbeiten/Sortieren automatisch zum "
             "bearbeiteten Eintrag. Wenn deaktiviert: die aktuelle Scroll-Position bleibt erhalten.\n"
@@ -378,7 +341,7 @@ class MangaLibraryApp(QMainWindow):
 
         self.exclude_gestoppt_action = config_menu.addAction("Gestoppt: keine Berechnung")
         self.exclude_gestoppt_action.setCheckable(True)
-        self.exclude_gestoppt_action.setChecked(config.get("exclude_gestoppt_from_stats", False))
+        self.exclude_gestoppt_action.setChecked(config.get_bool("exclude_gestoppt_from_stats"))
         self.exclude_gestoppt_action.setToolTip(
             "Wenn aktiv: Titel mit VÖ +1 = „Gestoppt“ fließen nicht in die Statistik-Box "
             "und die Gesamt/Gelesen/Offen-Bilanz je Typ ein.\n"
@@ -410,6 +373,8 @@ class MangaLibraryApp(QMainWindow):
             "QPushButton { background-color: #4CAF50; color: white; padding: 4px 12px; font-weight: bold; }"
             "QPushButton:hover { background-color: #43A047; }"
         )
+        self.save_btn.setShortcut(QKeySequence.Save)
+        self.save_btn.setToolTip("Alle Änderungen dauerhaft in der Datenbank speichern (Strg+S)")
         self.save_btn.clicked.connect(self.save)
         bar.addWidget(self.save_btn)
 
@@ -468,7 +433,7 @@ class MangaLibraryApp(QMainWindow):
         bar.addWidget(QLabel("Verlag:"))
         self.verlag_filter = QComboBox()
         self.verlag_filter.setMinimumWidth(160)
-        self.verlag_filter.currentIndexChanged.connect(lambda _i: self.refresh())
+        self.verlag_filter.currentIndexChanged.connect(lambda _i: self._refresh_table())
         bar.addWidget(self.verlag_filter)
 
         bar.addSpacing(16)
@@ -476,7 +441,7 @@ class MangaLibraryApp(QMainWindow):
         self.voe1_filter = QComboBox()
         self.voe1_filter.addItems(VOE1_FILTER_OPTIONS)
         self.voe1_filter.setMinimumWidth(120)
-        self.voe1_filter.currentIndexChanged.connect(lambda _i: self.refresh())
+        self.voe1_filter.currentIndexChanged.connect(lambda _i: self._refresh_table())
         bar.addWidget(self.voe1_filter)
 
         reset_btn = QPushButton("Filter zurücksetzen")
@@ -498,10 +463,10 @@ class MangaLibraryApp(QMainWindow):
             # Anwendung würde sonst eine bereits von Hand verschobene
             # Seitenleiste ungefragt wieder überschreiben.
             self.follow_selection_action.blockSignals(True)
-            self.follow_selection_action.setChecked(config.get("follow_selection_after_edit", True))
+            self.follow_selection_action.setChecked(config.get_bool("follow_selection_after_edit"))
             self.follow_selection_action.blockSignals(False)
             self.exclude_gestoppt_action.blockSignals(True)
-            self.exclude_gestoppt_action.setChecked(config.get("exclude_gestoppt_from_stats", False))
+            self.exclude_gestoppt_action.setChecked(config.get_bool("exclude_gestoppt_from_stats"))
             self.exclude_gestoppt_action.blockSignals(False)
             self.model.colors_enabled = config.get_dict("colors_enabled")
             for key, action in self._color_actions.items():
@@ -608,7 +573,12 @@ class MangaLibraryApp(QMainWindow):
         row.addWidget(QLabel("Suche:"))
         self.search_input = QLineEdit()
         self.search_input.setClearButtonEnabled(True)
-        self.search_input.textChanged.connect(lambda _t: self.refresh())
+        # Suche erst nach einer kurzen Tipp-Pause auswerten, nicht bei jedem Tastendruck
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(SEARCH_DELAY_MS)
+        self._search_timer.timeout.connect(self._refresh_table)
+        self.search_input.textChanged.connect(lambda _t: self._search_timer.start())
         row.addWidget(self.search_input, 1)
         layout.addLayout(row)
 
@@ -874,11 +844,18 @@ class MangaLibraryApp(QMainWindow):
         return rows
 
     def refresh(self):
+        """Alles neu anzeigen: Filterauswahl, Verlagsfarben, Seitenleiste und
+        Tabelle - nach jeder Änderung am Bestand."""
         self._refresh_verlag_filter_options()
         colors.set_verlag_universe(self._distinct_values("verlag"))
         self._update_stats()
         self._update_counts()
         self._update_releases()
+        self._refresh_table()
+
+    def _refresh_table(self):
+        """Nur die Tabelle neu filtern/sortieren (Suche, Filter, Sortierung) -
+        die Seitenleiste hängt davon nicht ab."""
         rows = self._filtered_sorted_data()
 
         follow_selection = self.follow_selection_action.isChecked()
@@ -933,12 +910,15 @@ class MangaLibraryApp(QMainWindow):
         else:
             self.sort_column = column
             self.sort_reverse = False
-        self.refresh()
+        self._refresh_table()
 
     # ------------------------------------------------------------ Aktionen
 
     def open_add_dialog(self):
-        dlg = EntryDialog(self, "Neuer Eintrag", on_save=self._add_entry, verlag_values=self._distinct_values("verlag"))
+        dlg = EntryDialog(
+            self, "Neuer Eintrag", on_save=self._add_entry,
+            verlag_values=self._distinct_values("verlag"), other_titles=self.buffer.titles_except(),
+        )
         dlg.exec()
 
     def edit_selected(self):
@@ -952,7 +932,7 @@ class MangaLibraryApp(QMainWindow):
         dlg = EntryDialog(
             self, "Eintrag bearbeiten", initial=entry,
             on_save=lambda v: self._update_entry(row_id, v),
-            verlag_values=self._distinct_values("verlag"),
+            verlag_values=self._distinct_values("verlag"), other_titles=self.buffer.titles_except(row_id),
         )
         dlg.exec()
 
@@ -981,12 +961,8 @@ class MangaLibraryApp(QMainWindow):
         entry = self._find_entry(self._selected_id())
         if entry is None or not (entry.get("bestellt") or entry.get("angekommen")):
             return
-        self._push_undo_snapshot()
-        entry["bestellt"] = ""
-        entry["angekommen"] = ""
-        self._mark_dirty()
-        self._commit_pending_action()
-        self.refresh()
+        entry = self.buffer.clear_marks(entry["id"])
+        self._after_change()
         self._log(f"Bestellt-/Angekommen-Markierung entfernt: „{entry.get('titel')}“.")
 
     def search_selected_on_buchhandel(self):
@@ -1028,69 +1004,47 @@ class MangaLibraryApp(QMainWindow):
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
         )
         if answer == QMessageBox.Yes:
-            self._push_undo_snapshot()
-            self.data = [e for e in self.data if e["id"] != row_id]
-            self._mark_dirty()
-            self._commit_pending_action()
-            self._autosize_titel_column()
-            self.refresh()
+            self.buffer.delete(row_id)
+            self._after_change(autosize=True)
             self._log(f"Gelöscht: „{entry['titel']}“.")
 
     def _add_entry(self, values):
-        self._push_undo_snapshot()
-        values["id"] = self.next_temp_id
-        self.next_temp_id -= 1
-        self.data.append(values)
-        self.selected_row_id = values["id"]
-        self._mark_dirty()
-        self._commit_pending_action()
-        self._autosize_titel_column()
-        self.refresh()
-        self._log(f"Neuer Eintrag: „{values.get('titel') or '(ohne Titel)'}“.")
+        entry = self.buffer.add(values)
+        self.selected_row_id = entry["id"]
+        self._after_change(autosize=True)
+        self._log(f"Neuer Eintrag: „{entry.get('titel') or '(ohne Titel)'}“.")
 
     def _update_entry(self, row_id, values):
-        entry = self._find_entry(row_id)
+        entry = self.buffer.update(row_id, values)   # erreichte Bestell-Markierungen entfallen dabei
         if entry is None:
             return
-        self._push_undo_snapshot()
-        entry.update(values)
         self.selected_row_id = row_id
-        self._mark_dirty()
-        self._commit_pending_action()
-        self._autosize_titel_column()
-        self.refresh()
+        self._after_change(autosize=True)
         self._log(f"Bearbeitet: „{entry.get('titel') or '(ohne Titel)'}“.")
 
     def _increment_baende(self, row_id):
         entry = self._find_entry(row_id)
         if entry is None:
             return
-        self._push_undo_snapshot()
-        new_value = logic.increment_baende(entry)
+        # Markierungen entfallen erst, wenn ihr Band erreicht ist - ist Band 14
+        # bestellt und kommt jetzt Band 13 dazu, bleibt "bestellt" stehen.
+        new_value = self.buffer.increment_baende(row_id)
         if new_value is None:
-            self._discard_pending_snapshot()
             QMessageBox.warning(self, "Hinweis", "„Bände (bis)“ enthält keine gültige Zahl.")
             return
-        entry["bestellt"] = ""  # der bestellte Band ist im Bestand -> beide Markierungen entfallen
-        entry["angekommen"] = ""
         self.selected_row_id = row_id
-        self._mark_dirty()
-        self._commit_pending_action()
-        self.refresh()
-        self._log(f"„{entry.get('titel')}“: Bände (bis) auf {new_value} erhöht.")
+        self._after_change()
+        self._log(f"„{self._find_entry(row_id).get('titel')}“: Bände (bis) auf {new_value} erhöht.")
 
     def _increment_gelesen(self, row_id):
         entry = self._find_entry(row_id)
         if entry is None:
             return
-        self._push_undo_snapshot()
-        result = logic.increment_gelesen(entry)
+        result = self.buffer.increment_gelesen(row_id)
         if result is None:
-            self._discard_pending_snapshot()
             QMessageBox.warning(self, "Hinweis", "„Gelesen bis“ enthält keine gültige Zahl.")
             return
         if result == logic.EXCEEDS:
-            self._discard_pending_snapshot()
             QMessageBox.information(
                 self, "Hinweis",
                 "„Gelesen bis“ kann nicht über „Bände (bis)“ hinaus erhöht werden – "
@@ -1098,10 +1052,8 @@ class MangaLibraryApp(QMainWindow):
             )
             return
         self.selected_row_id = row_id
-        self._mark_dirty()
-        self._commit_pending_action()
-        self.refresh()
-        self._log(f"„{entry.get('titel')}“: Gelesen bis auf {result} erhöht.")
+        self._after_change()
+        self._log(f"„{self._find_entry(row_id).get('titel')}“: Gelesen bis auf {result} erhöht.")
 
     def import_csv_dialog(self):
         path, _filter = QFileDialog.getOpenFileName(self, "CSV-Datei auswählen", "", "CSV-Dateien (*.csv)")
@@ -1110,34 +1062,14 @@ class MangaLibraryApp(QMainWindow):
 
         try:
             parsed_entries, warnings = import_csv.parse_csv(path)
-        except ValueError as exc:
+        except (ValueError, OSError, csv.Error) as exc:
             QMessageBox.critical(self, "CSV-Import", f"Import abgebrochen:\n\n{exc}")
             return
 
-        existing_titles = {(e.get("titel") or "").strip().lower() for e in self.data}
-        imported, skipped = 0, 0
-        if parsed_entries:
-            self._push_undo_snapshot()
-        for parsed in parsed_entries:
-            title_key = parsed["titel"].strip().lower()
-            if title_key in existing_titles:
-                skipped += 1
-                continue
-            parsed["id"] = self.next_temp_id
-            self.next_temp_id -= 1
-            self.data.append(parsed)
-            existing_titles.add(title_key)
-            imported += 1
-
+        imported, skipped = self.buffer.import_entries(parsed_entries)
+        self._after_change(autosize=bool(imported))
         if imported:
-            self._mark_dirty()
-            self._commit_pending_action()
-            self._autosize_titel_column()
             self._log(f"CSV-Import: {imported} neu importiert, {skipped} übersprungen ({path}).")
-        elif parsed_entries:
-            self._discard_pending_snapshot()  # nichts importiert -> Snapshot wieder verwerfen
-
-        self.refresh()
 
         message = (
             f"{imported} neu importiert, {skipped} übersprungen (bereits vorhanden).\n"
@@ -1175,22 +1107,17 @@ class MangaLibraryApp(QMainWindow):
     def _apply_order_items(self, items, mail_count, source, problems=()):
         """Ordnet die Artikel den Einträgen zu und markiert diese: Bestell-
         bestätigung -> Feld "bestellt" (Titel hellblau), Abhol-Benachrichtigung
-        -> Feld "angekommen" (roter Balken links am Titel). Gemeinsamer Weg
+        -> Feld "angekommen" (roter Balken links am Titel), jeweils mit der
+        Bandnummer als Wert (siehe order_mail.FLAG_FIELD). Gemeinsamer Weg
         für .eml-Dateien und den Postfach-Abruf. Ins Log geht nur, welche
         Titel markiert wurden - nichts aus den E-Mails selbst."""
         matches, already_owned, unmatched = order_mail.match_items(items, self.data)
-        flag_of = {order_mail.KIND_ORDER: "bestellt", order_mail.KIND_PICKUP: "angekommen"}
-        new_matches = [m for m in matches if not m.entry.get(flag_of[m.item.kind])]
+        new_matches = self.buffer.apply_order_matches(matches)  # neu markiert oder auf höheren Band angehoben
         new_ordered = [m for m in new_matches if m.item.kind == order_mail.KIND_ORDER]
         new_arrived = [m for m in new_matches if m.item.kind == order_mail.KIND_PICKUP]
 
         if new_matches:
-            self._push_undo_snapshot()
-            for m in new_matches:
-                m.entry[flag_of[m.item.kind]] = "1"
-            self._mark_dirty()
-            self._commit_pending_action()
-            self.refresh()
+            self._after_change()
             for label, group in (("bestellt", new_ordered), ("angekommen", new_arrived)):
                 if group:
                     self._log(
@@ -1335,7 +1262,10 @@ class MangaLibraryApp(QMainWindow):
         paths = self._dropped_eml_paths(event.mimeData())
         if paths:
             event.acceptProposedAction()
-            self._import_order_files(paths, "Drag & Drop")
+            # Erst nach dem Ablegen verarbeiten: ein Meldungsfenster direkt im
+            # dropEvent würde unter Windows die Quelle (Explorer, Thunderbird)
+            # blockieren, bis es geschlossen wird.
+            QTimer.singleShot(0, lambda: self._import_order_files(paths, "Drag & Drop"))
         else:
             super().dropEvent(event)
 
@@ -1352,6 +1282,29 @@ class MangaLibraryApp(QMainWindow):
             return
         QMessageBox.information(self, "CSV-Export", f"{count} Einträge wurden exportiert nach:\n{path}")
 
+    def _busy_dialog(self, title, text):
+        """Fortschrittsfenster ohne Abbrechen für eine Hintergrund-Aufgabe."""
+        progress = QProgressDialog(text, None, 0, 0, self)
+        progress.setWindowTitle(title)
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setCancelButton(None)
+        progress.setMinimumDuration(0)
+        progress.show()
+        return progress
+
+    def _import_drive_sync(self):
+        try:
+            import drive_sync
+        except ImportError as exc:
+            QMessageBox.critical(
+                self, "Google Drive",
+                f"Die Google-Bibliotheken fehlen ({exc}).\n\nBitte installieren mit:\npip install -r requirements.txt",
+            )
+            return None
+        return drive_sync
+
+    _DRIVE_HINT = "Falls sich ein Browserfenster zur Google-Anmeldung öffnet, bitte dort anmelden."
+
     def drive_upload(self):
         if self.dirty:
             answer = QMessageBox.question(
@@ -1362,17 +1315,25 @@ class MangaLibraryApp(QMainWindow):
             )
             if answer != QMessageBox.Yes or not self.save():
                 return
+        drive_sync = self._import_drive_sync()
+        if drive_sync is None:
+            return
+        # Im Hintergrund: die erste Anmeldung wartet auf den Browser, das darf
+        # die Oberfläche nicht einfrieren ("Keine Rückmeldung").
+        progress = self._busy_dialog("Google Drive", f"Sichere zu Google Drive ...\n{self._DRIVE_HINT}")
+        call = AsyncCall(drive_sync.upload, self)
+        call.finished.connect(lambda _result, error: self._finish_drive_upload(progress, error))
+        self._drive_call = call
+        call.start()
 
-        try:
-            import drive_sync
-            self.statusBar().showMessage("Sichere zu Google Drive ...")
-            QApplication.processEvents()
-            drive_sync.upload()
-            QMessageBox.information(self, "Google Drive", "Datenbank wurde erfolgreich zu Google Drive gesichert.")
-        except Exception as exc:  # noqa: BLE001 - dem Nutzer die Ursache zeigen
-            QMessageBox.critical(self, "Google Drive", str(exc))
-        finally:
-            self.refresh()
+    def _finish_drive_upload(self, progress, error):
+        progress.close()
+        self._drive_call = None
+        if error is not None:
+            QMessageBox.critical(self, "Google Drive", str(error))
+            return
+        self._log("Zu Google Drive gesichert.")
+        QMessageBox.information(self, "Google Drive", "Datenbank wurde erfolgreich zu Google Drive gesichert.")
 
     def drive_download(self):
         warning = "Die lokale Datenbank wird durch die Version aus Google Drive ersetzt. Fortfahren?"
@@ -1383,29 +1344,34 @@ class MangaLibraryApp(QMainWindow):
         )
         if answer != QMessageBox.Yes:
             return
+        drive_sync = self._import_drive_sync()
+        if drive_sync is None:
+            return
+        progress = self._busy_dialog("Google Drive", f"Lade von Google Drive ...\n{self._DRIVE_HINT}")
+        call = AsyncCall(drive_sync.download, self)
+        call.finished.connect(lambda backup_path, error: self._finish_drive_download(progress, backup_path, error))
+        self._drive_call = call
+        call.start()
+
+    def _finish_drive_download(self, progress, backup_path, error):
+        progress.close()
+        self._drive_call = None
+        if error is not None:
+            QMessageBox.critical(self, "Google Drive", str(error))
+            return
         try:
-            import drive_sync
-            self.statusBar().showMessage("Lade von Google Drive ...")
-            QApplication.processEvents()
-            backup_path = drive_sync.download()
             db.init_db()  # ältere Sicherung -> Schema ggf. auf den aktuellen Stand migrieren
-            self.data = db.load_all()
-            self._clean_snapshot = copy.deepcopy(self.data)
-            self.dirty = False
-            self.undo_stack.clear()
-            self.redo_stack.clear()
-            self._update_undo_redo_actions()
-            self._update_title()
-            self._autosize_titel_column()
-            message = "Datenbank wurde erfolgreich von Google Drive geladen."
-            if backup_path:
-                message += f"\n\nDie bisherige lokale Datenbank wurde gesichert unter:\n{backup_path}"
-            self._log(f"Von Google Drive geladen ({len(self.data)} Einträge, Sicherung: {backup_path or '–'}).")
-            QMessageBox.information(self, "Google Drive", message)
-        except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(self, "Google Drive", str(exc))
-        finally:
-            self.refresh()
+            self.buffer.load(db.load_all())
+        except Exception as exc:  # noqa: BLE001 - dem Nutzer die Ursache zeigen
+            QMessageBox.critical(self, "Google Drive", f"Die geladene Datenbank konnte nicht geöffnet werden:\n\n{exc}")
+            return
+        self.selected_row_id = None
+        self._after_change(autosize=True)
+        message = "Datenbank wurde erfolgreich von Google Drive geladen."
+        if backup_path:
+            message += f"\n\nDie bisherige lokale Datenbank wurde gesichert unter:\n{backup_path}"
+        self._log(f"Von Google Drive geladen ({len(self.data)} Einträge, Sicherung: {backup_path or '–'}).")
+        QMessageBox.information(self, "Google Drive", message)
 
     # ------------------------------------------------------ ISBN-Abgleich
 
@@ -1427,19 +1393,6 @@ class MangaLibraryApp(QMainWindow):
         if overwrite:
             label += " (inkl. bereits vorhandener ISBNs)"
 
-        # Der Abgleich liest/schreibt direkt in der Datenbankdatei, nicht im
-        # Puffer - ungespeicherte Änderungen müssten sonst ignoriert werden.
-        if self.dirty:
-            answer = QMessageBox.question(
-                self, "Ungespeicherte Änderungen",
-                "Der ISBN-Abgleich arbeitet direkt auf der gespeicherten Datenbank. "
-                "Ungespeicherte Änderungen müssen dafür zuerst gespeichert werden. "
-                "Jetzt speichern und fortfahren?",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
-            )
-            if answer != QMessageBox.Yes or not self.save():
-                return
-
         try:
             import isbn_lookup
         except ImportError:
@@ -1449,53 +1402,72 @@ class MangaLibraryApp(QMainWindow):
             )
             return
 
-        progress = QProgressDialog(
-            f"Suche ISBNs für {label} ...\nDas kann je nach Anzahl der Titel ein bis zwei Minuten dauern.",
-            None, 0, 0, self,
-        )
+        progress = QProgressDialog(f"Suche ISBNs für {label} ...", "Abbrechen", 0, 0, self)
         progress.setWindowTitle("ISBN-Abgleich läuft ...")
         progress.setWindowModality(Qt.WindowModal)
-        progress.setCancelButton(None)
         progress.setMinimumDuration(0)
+        progress.setAutoReset(False)
+        progress.setAutoClose(False)
+        # "Abbrechen" soll den Dialog nicht sofort schließen (Standardverhalten),
+        # sondern offen lassen, bis der gerade laufende Titel fertig ist.
+        cancel_event = threading.Event()
+        progress.canceled.disconnect(progress.cancel)
+        progress.canceled.connect(lambda: self._cancel_isbn_lookup(progress, cancel_event))
         progress.show()
 
-        signals = IsbnWorkerSignals()
-        signals.finished.connect(lambda report, bestellliste, error: self._finish_isbn_lookup(
-            progress, label, report, bestellliste, error
+        # Gesucht wird im aktuellen Zwischenspeicher (auch ungespeicherte
+        # Änderungen) - als Kopie, weil der Abgleich im Hintergrund läuft.
+        # In die Datenbankdatei schreibt er nur die ISBN-Tabellen.
+        entries = copy.deepcopy(self.data)
+        db_path = str(db.DB_FILE)
+
+        def run():
+            report = isbn_lookup.fill_missing_isbns(
+                db_path, only_month=only_month, only_status=only_status, overwrite=overwrite,
+                progress=call.progress.emit, cancel=cancel_event, entries=entries,
+            )
+            if kind == "month":
+                bestellliste = isbn_lookup.bestellliste_markdown(db_path, month, year, entries=entries)
+            else:
+                bestellliste = isbn_lookup.bestellliste_markdown(db_path, status=status, entries=entries)
+            return report, bestellliste
+
+        call = AsyncCall(run, self)
+        call.progress.connect(lambda done, total, titel: self._update_isbn_progress(
+            progress, label, cancel_event, done, total, titel
         ))
+        call.finished.connect(lambda result, error: self._finish_isbn_lookup(progress, label, result, error))
+        self._isbn_call = call
+        call.start()
 
-        def worker():
-            report = None
-            bestellliste = None
-            error = None
-            try:
-                db_path = str(db.DB_FILE)
-                report = isbn_lookup.fill_missing_isbns(
-                    db_path, only_month=only_month, only_status=only_status, overwrite=overwrite
-                )
-                if kind == "month":
-                    bestellliste = isbn_lookup.bestellliste_markdown(db_path, month, year)
-                else:
-                    bestellliste = isbn_lookup.bestellliste_markdown(db_path, status=status)
-            except Exception as exc:  # noqa: BLE001 - dem Nutzer die Ursache zeigen
-                error = str(exc)
-            signals.finished.emit(report, bestellliste, error)
+    @staticmethod
+    def _update_isbn_progress(progress, label, cancel_event, done, total, titel):
+        if cancel_event.is_set():
+            return  # Hinweis "wird abgebrochen" stehen lassen
+        progress.setMaximum(total)
+        progress.setValue(done)
+        progress.setLabelText(f"Suche ISBNs für {label} ...\nTitel {done + 1} von {total}: {titel}")
 
-        self._isbn_signals = signals  # Referenz halten, damit Qt sie nicht vorzeitig einsammelt
-        threading.Thread(target=worker, daemon=True).start()
+    @staticmethod
+    def _cancel_isbn_lookup(progress, cancel_event):
+        cancel_event.set()
+        progress.setLabelText(
+            "Wird abgebrochen ...\nDer gerade laufende Titel wird noch fertig geprüft; "
+            "bereits gefundene ISBNs bleiben gespeichert."
+        )
+        progress.setCancelButton(None)
 
-    def _finish_isbn_lookup(self, progress, label, report, bestellliste, error):
+    def _finish_isbn_lookup(self, progress, label, result, error):
         progress.close()
-
-        # Anders als früher: der ISBN-Abgleich schreibt seit der
-        # isbn_cache-Tabelle nichts mehr in `werke` - der Zwischenspeicher
-        # (Puffer, Undo/Redo, "ungespeicherte Änderungen") ist von einem
-        # Abgleich also gar nicht betroffen und muss weder neu geladen
-        # noch zurückgesetzt werden.
-
-        if error:
+        self._isbn_call = None
+        # Der Abgleich schreibt nur in die ISBN-Tabellen, nie in `werke` - der
+        # Zwischenspeicher bleibt unberührt.
+        if error is not None:
             QMessageBox.critical(self, "ISBN-Abgleich", f"Fehler beim Abgleich:\n\n{error}")
             return
+        report, bestellliste = result
+        if report.abgebrochen:
+            label += " – abgebrochen"
 
         win = IsbnResultWindow(self, label, report, bestellliste)
         win.exec()

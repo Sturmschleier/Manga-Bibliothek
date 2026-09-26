@@ -20,6 +20,7 @@ vollständig angekommen und als intakte Datenbank geprüft ist; die bisherige
 lokale Datenbank wird vorher nach BACKUP/ gesichert (siehe download()).
 """
 
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -34,6 +35,7 @@ SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 BASE_DIR = base_dir()
 CREDENTIALS_FILE = BASE_DIR / "credentials.json"
 TOKEN_FILE = BASE_DIR / "token.json"
+LOGIN_TIMEOUT_SECONDS = 300   # so lange wartet die erste Anmeldung auf den Browser
 DRIVE_FOLDER_NAME = "MangaLibrary"
 DRIVE_FILE_NAME = "manga_library.db"
 
@@ -52,16 +54,38 @@ def _get_credentials():
 
     creds = None
     if TOKEN_FILE.exists():
-        creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+        try:
+            creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+        except ValueError:
+            creds = None  # kaputte token.json -> neu anmelden
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
-            creds = flow.run_local_server(port=0)
+            try:
+                creds.refresh(Request())
+            except RefreshError:
+                creds = None  # Token abgelaufen/widerrufen -> neu anmelden
+        if not creds or not creds.valid:
+            creds = _login()
         TOKEN_FILE.write_text(creds.to_json())
 
+    return creds
+
+
+def _login():
+    """Anmeldung im Browser. Wird sie nicht innerhalb von LOGIN_TIMEOUT_SECONDS
+    abgeschlossen, bricht der Vorgang mit einer verständlichen Meldung ab,
+    statt endlos zu warten."""
+    flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
+    try:
+        creds = flow.run_local_server(port=0, timeout_seconds=LOGIN_TIMEOUT_SECONDS)
+    except Exception as exc:  # noqa: BLE001 - Zeitüberschreitung, abgelehnte Anmeldung ...
+        raise DriveSyncError(
+            f"Die Google-Anmeldung wurde nicht abgeschlossen ({exc}). Bitte erneut versuchen "
+            f"und die Anmeldung im Browser innerhalb von {LOGIN_TIMEOUT_SECONDS // 60} Minuten bestätigen."
+        ) from exc
+    if creds is None:
+        raise DriveSyncError("Die Google-Anmeldung wurde nicht abgeschlossen. Bitte erneut versuchen.")
     return creds
 
 

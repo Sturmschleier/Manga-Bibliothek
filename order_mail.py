@@ -19,7 +19,7 @@ from datetime import datetime
 from email import policy
 from email.parser import BytesParser
 from html.parser import HTMLParser
-from typing import Optional
+from logic import parse_int
 
 _PRICE_RE = re.compile(r"^\d[\d.,]*\s*(EUR|€)$", re.IGNORECASE)
 # "…04-EAN:9783755507260" am Ende des Artikelnamens
@@ -27,6 +27,12 @@ _EAN_SUFFIX_RE = re.compile(r"[\s-]*EAN\s*:?\s*\d+\s*$", re.IGNORECASE)
 
 KIND_ORDER = "bestellung"    # Bestellbestätigung: Artikel wurden bestellt
 KIND_PICKUP = "abholung"     # Abhol-Benachrichtigung: Artikel sind angekommen
+
+# Feld des Eintrags, in dem die jeweilige Markierung steht. Gespeichert wird
+# die (höchste) Bandnummer, für die sie gilt - z.B. bestellt = "14". Sie
+# entfällt erst, wenn "Bände (bis)" diesen Band erreicht (siehe
+# logic.clear_fulfilled_marks), nicht schon beim nächsten "+1".
+FLAG_FIELD = {KIND_ORDER: "bestellt", KIND_PICKUP: "angekommen"}
 _BAND_RE = re.compile(r"^(?:band\s+|bd\s+|vol\s+|volume\s+)?(\d+)(?=\s|$)")
 
 
@@ -44,7 +50,6 @@ class _RowCollector(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.rows = []
-        self.text = []
         self._row = None
         self._cell = None
 
@@ -67,7 +72,6 @@ class _RowCollector(HTMLParser):
             self.rows.append([])  # Tabellenende als Trennmarke (verschachtelte Tabellen verlieren sonst ihre Zeilengrenzen)
 
     def handle_data(self, data):
-        self.text.append(data)
         if self._cell is not None:
             self._cell.append(data)
 
@@ -81,12 +85,22 @@ def parse_eml(path: str) -> list[OrderItem]:
 
 def parse_message_bytes(raw: bytes) -> list[OrderItem]:
     """Wie parse_eml, aber für eine E-Mail, die bereits als Bytes im
-    Speicher vorliegt (z.B. per IMAP abgerufen, siehe mail_fetch.py)."""
-    message = BytesParser(policy=policy.default).parsebytes(raw)
-    body = message.get_body(preferencelist=("html",))
-    if body is None:
-        raise ValueError("Die E-Mail enthält keinen HTML-Teil mit einer Artikelliste.")
-    return parse_html(body.get_content())
+    Speicher vorliegt (z.B. per IMAP abgerufen, siehe mail_fetch.py).
+
+    Löst bei jeder nicht auswertbaren Mail ValueError aus - auch bei
+    technisch kaputten oder ungewöhnlichen Mails (z.B. unbekannter
+    Zeichensatz), damit eine einzelne solche Mail nicht den ganzen Import
+    mehrerer Mails abbricht."""
+    try:
+        message = BytesParser(policy=policy.default).parsebytes(raw)
+        body = message.get_body(preferencelist=("html",))
+        if body is None:
+            raise ValueError("Die E-Mail enthält keinen HTML-Teil mit einer Artikelliste.")
+        return parse_html(body.get_content())
+    except ValueError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - fremde Mail-Inhalte: jeder Fehler = "nicht lesbar"
+        raise ValueError(f"Die E-Mail konnte nicht gelesen werden ({type(exc).__name__}: {exc}).") from exc
 
 
 def _clean_name(name: str) -> str:
@@ -160,7 +174,10 @@ def match_items(items, entries):
     markiert.
 
     Gibt (matches, already_owned, unmatched) zurück:
-      - matches:       Liste von Match
+      - matches:       Liste von Match - je Eintrag und Art (bestellt/
+                       abholbereit) nur einer, und zwar mit dem höchsten
+                       Band (z.B. Band 13 und 14 in derselben Bestellung
+                       -> Band 14)
       - already_owned: Liste von Match (Band schon im Bestand)
       - unmatched:     Liste von OrderItem ohne passenden Eintrag
     """
@@ -172,7 +189,7 @@ def match_items(items, entries):
     candidates.sort(key=lambda c: len(c[0]), reverse=True)
 
     matches, already_owned, unmatched = [], [], []
-    seen = set()
+    position = {}  # (id(entry), kind) -> Index in matches
     for item in items:
         name = _normalize(item.name)
         found = None
@@ -188,7 +205,7 @@ def match_items(items, entries):
             # ("Togen Anki - Teufelsblut 23", "... Light Novel 10"). Nur
             # akzeptiert, wenn die Nummer genau der nächste Band (Bände (bis)
             # + 1) ist - sonst zu unsicher.
-            owned = _as_int(entry.get("baende_bis"))
+            owned = parse_int(entry.get("baende_bis"))
             if owned is not None and str(owned + 1) in rest.split():
                 found = Match(item, entry, owned + 1)
                 break
@@ -196,13 +213,32 @@ def match_items(items, entries):
             unmatched.append(item)
             continue
 
-        owned = _as_int(found.entry.get("baende_bis"))
+        owned = parse_int(found.entry.get("baende_bis"))
+        key = (id(found.entry), item.kind)
         if owned is not None and found.band <= owned:
             already_owned.append(found)
-        elif (id(found.entry), item.kind) not in seen:
-            seen.add((id(found.entry), item.kind))
+        elif key not in position:
+            position[key] = len(matches)
             matches.append(found)
+        elif found.band > matches[position[key]].band:
+            matches[position[key]] = found
     return matches, already_owned, unmatched
+
+
+def new_marks(matches):
+    """
+    Die Treffer aus match_items(), die eine Markierung tatsächlich ändern:
+    Eintrag noch nicht markiert, oder bisher für einen niedrigeren Band
+    markiert (dann wird auf den höheren Band angehoben). Treffer, deren
+    Band nicht über der vorhandenen Markierung liegt, bleiben außen vor.
+    """
+    result = []
+    for m in matches:
+        current = m.entry.get(FLAG_FIELD[m.item.kind]) or ""
+        current_band = parse_int(current)
+        if not current or (current_band is not None and m.band > current_band):
+            result.append(m)
+    return result
 
 
 def build_log(source, mail_count, items, matches, new_matches, already_owned, unmatched,
@@ -254,9 +290,3 @@ def build_log(source, mail_count, items, matches, new_matches, already_owned, un
     lines.append("")
     return lines
 
-
-def _as_int(value) -> Optional[int]:
-    try:
-        return int(str(value or "").strip())
-    except ValueError:
-        return None

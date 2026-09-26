@@ -94,25 +94,18 @@ class FetchedMail:
 
 # --------------------------------------------------------------- Einstellungen
 
-def _int_setting(key: str, default: int) -> int:
-    try:
-        return int(config.get(key, default))
-    except (TypeError, ValueError):
-        return default
-
-
 def load_settings() -> MailSettings:
     security = str(config.get("mail_imap_security", "ssl")).lower()
     return MailSettings(
         host=str(config.get("mail_imap_host", "") or "").strip(),
-        port=_int_setting("mail_imap_port", 993),
+        port=config.get_int("mail_imap_port", 993),
         security=security if security in ("ssl", "starttls") else "ssl",
         user=str(config.get("mail_imap_user", "") or "").strip(),
         folder=str(config.get("mail_folder", "INBOX") or "INBOX").strip(),
         sender=str(config.get("mail_filter_sender", "") or "").strip(),
         subject=str(config.get("mail_filter_subject", "") or "").strip(),
-        days_back=max(1, _int_setting("mail_days_back", 90)),
-        max_messages=max(1, _int_setting("mail_max_messages", 30)),
+        days_back=max(1, config.get_int("mail_days_back", 90)),
+        max_messages=max(1, config.get_int("mail_max_messages", 30)),
     )
 
 
@@ -305,9 +298,11 @@ def fetch_orders(settings: MailSettings, password: str, connect: Optional[Callab
         subject_f = settings.subject.strip().casefold()
         candidates = []
         for uid in reversed(uids):  # neueste zuerst
-            headers = BytesParser(policy=policy.default).parsebytes(
-                _fetch_bytes(conn, uid, "HEADER.FIELDS (FROM SUBJECT DATE)"), headersonly=True
-            )
+            try:
+                raw_headers = _fetch_bytes(conn, uid, "HEADER.FIELDS (FROM SUBJECT DATE)")
+            except MailError:
+                continue  # einzelne nicht ladbare Nachricht überspringen statt den ganzen Abruf abzubrechen
+            headers = BytesParser(policy=policy.default).parsebytes(raw_headers, headersonly=True)
             from_h = _decode_header_value(headers["From"])
             subj_h = _decode_header_value(headers["Subject"])
             if sender_f and sender_f not in from_h.casefold():
@@ -322,11 +317,12 @@ def fetch_orders(settings: MailSettings, password: str, connect: Optional[Callab
             if len(candidates) >= settings.max_messages:
                 break
 
+        # Jede Mail für sich: eine nicht ladbare oder nicht lesbare Mail wird
+        # nur markiert (mail.error), die übrigen werden trotzdem ausgewertet.
         for mail in candidates:
-            raw = _fetch_bytes(conn, mail.uid, "")
             try:
-                mail.items = order_mail.parse_message_bytes(raw)
-            except ValueError as exc:
+                mail.items = order_mail.parse_message_bytes(_fetch_bytes(conn, mail.uid, ""))
+            except (MailError, ValueError) as exc:
                 mail.error = str(exc)
         return candidates
     except (OSError, socket.timeout, imaplib.IMAP4.error) as exc:

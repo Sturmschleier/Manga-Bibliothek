@@ -50,4 +50,6 @@ def order_url(isbn: str, shop: str = None) -> str:
     """Link zur ISBN beim gewählten (oder angegebenen) Anbieter."""
     shops = available()
     template = shops.get(shop or active_name()) or next(iter(shops.values()))
-    return template.format(isbn=isbn)
+    # replace statt format: andere geschweifte Klammern in einer selbst
+    # eingetragenen Vorlage dürfen keinen Fehler auslösen
+    return template.replace("{isbn}", isbn)

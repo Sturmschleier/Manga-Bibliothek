@@ -106,3 +106,67 @@ def test_increment_gelesen_invalid_baende_skips_check():
 def test_increment_gelesen_invalid_number_returns_none():
     entry = {"gelesen_bis": "xyz"}
     assert logic.increment_gelesen(entry) is None
+
+
+# ------------------------------------------- Bestellt-/Angekommen-Markierungen
+
+def test_clear_fulfilled_marks_keeps_mark_for_band_not_yet_owned():
+    entry = {"baende_bis": "13", "bestellt": "14", "angekommen": ""}
+    assert logic.clear_fulfilled_marks(entry) is False
+    assert entry["bestellt"] == "14"
+
+
+def test_clear_fulfilled_marks_removes_marks_once_band_is_owned():
+    entry = {"baende_bis": "14", "bestellt": "14", "angekommen": "13"}
+    assert logic.clear_fulfilled_marks(entry) is True
+    assert entry["bestellt"] == "" and entry["angekommen"] == ""
+
+
+def test_increment_then_clear_only_removes_reached_mark():
+    entry = {"baende_bis": "12", "voe_1": "01.10.2026", "voe_2": "", "voe_3": "",
+             "bestellt": "14", "angekommen": "13"}
+    logic.increment_baende(entry)
+    logic.clear_fulfilled_marks(entry)
+    assert (entry["bestellt"], entry["angekommen"]) == ("14", "")   # Band 13 ist da, 14 noch bestellt
+
+
+def test_clear_fulfilled_marks_leaves_unreadable_values_alone():
+    entry = {"baende_bis": "abc", "bestellt": "14"}
+    assert logic.clear_fulfilled_marks(entry) is False and entry["bestellt"] == "14"
+    entry = {"baende_bis": "20", "bestellt": "ja"}
+    assert logic.clear_fulfilled_marks(entry) is False and entry["bestellt"] == "ja"
+
+
+# ------------------------------------------------ parse_int / Formularprüfung
+
+def test_parse_int():
+    assert logic.parse_int(" 12 ") == 12
+    assert logic.parse_int("") is None and logic.parse_int(None) is None and logic.parse_int("12a") is None
+
+
+def _values(**kw):
+    base = {"titel": "Sanda", "baende_bis": "12", "gelesen_bis": "10", "zugang": "08.2022",
+            "voe_1": "TBA", "voe_2": "", "voe_3": ""}
+    base.update(kw)
+    return base
+
+
+def test_validate_entry_accepts_normal_values_and_free_text():
+    assert logic.validate_entry(_values()) == []
+    assert logic.validate_entry(_values(voe_1="Band 17 11.06.2025", voe_2="JP16", baende_bis="", gelesen_bis="")) == []
+
+
+def test_validate_entry_requires_title_and_rejects_duplicates():
+    assert logic.validate_entry(_values(titel="  ")) == ["Bitte einen Titel angeben."]
+    assert "gibt es bereits" in logic.validate_entry(_values(titel="SANDA"), {"sanda"})[0]
+
+
+def test_validate_entry_checks_numbers_and_dates():
+    problems = logic.validate_entry(_values(baende_bis="zwölf", gelesen_bis="3", voe_1="31.02.2026", zugang="13.2024"))
+    text = " ".join(problems)
+    assert "Bände (bis)" in text and "ganze Zahl" in text
+    assert "31.02.2026" in text and "13.2024" in text
+
+
+def test_validate_entry_gelesen_not_above_baende():
+    assert "nicht größer" in logic.validate_entry(_values(baende_bis="5", gelesen_bis="6"))[0]

@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 
 import config
 import database as db
+import logic
 import shops
 
 from .constants import JA_NEIN_OPTIONEN, TYP_OPTIONEN
@@ -23,12 +24,16 @@ from .constants import JA_NEIN_OPTIONEN, TYP_OPTIONEN
 class EntryDialog(QDialog):
     """Formular zum Anlegen/Bearbeiten eines einzelnen Werks (alle Spalten).
     Schreibt nicht selbst in den Puffer, sondern übergibt die Werte an
-    `on_save` - Puffer-Verwaltung bleibt Aufgabe der Hauptklasse."""
+    `on_save` - Puffer-Verwaltung bleibt Aufgabe der Hauptklasse.
+    Vor dem Übernehmen werden die Eingaben geprüft (logic.validate_entry);
+    `other_titles` sind die Titel aller anderen Einträge (klein geschrieben)
+    für die Prüfung auf doppelte Titel."""
 
-    def __init__(self, parent, title, on_save, initial=None, verlag_values=None):
+    def __init__(self, parent, title, on_save, initial=None, verlag_values=None, other_titles=()):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.on_save = on_save
+        self.other_titles = other_titles
 
         form = QFormLayout()
         self.fields = {}
@@ -78,11 +83,11 @@ class EntryDialog(QDialog):
         return widget.text().strip()
 
     def _save(self):
-        titel = self._field_value("titel")
-        if not titel:
-            QMessageBox.warning(self, "Hinweis", "Bitte einen Titel angeben.")
-            return
         values = {col: self._field_value(col) for col in db.COLUMN_NAMES}
+        problems = logic.validate_entry(values, self.other_titles)
+        if problems:
+            QMessageBox.warning(self, "Bitte prüfen", "\n".join(problems))
+            return
         self.on_save(values)
         self.accept()
 
@@ -93,8 +98,9 @@ class EntryDialog(QDialog):
 
 class ConfigDialog(QDialog):
     """Direkter Editor für die zentrale Konfigurationsdatei (config.json):
-    zeigt den rohen, formatierten JSON-Inhalt in einem Textfeld, validiert
-    beim Speichern und schreibt über config.save() zurück."""
+    zeigt den rohen, formatierten JSON-Inhalt in einem Textfeld, prüft beim
+    Speichern JSON-Syntax sowie Typen und Werte der bekannten Einstellungen
+    (config.validate) und schreibt erst dann über config.save() zurück."""
 
     def __init__(self, parent):
         super().__init__(parent)
@@ -144,6 +150,10 @@ class ConfigDialog(QDialog):
             return
         if not isinstance(parsed, dict):
             self.error_label.setText("Der Inhalt muss ein JSON-Objekt sein (z.B. { \"schlüssel\": \"wert\" }).")
+            return
+        problems = config.validate(parsed)
+        if problems:
+            self.error_label.setText("Nicht gespeichert:\n" + "\n".join(problems))
             return
         config.save(parsed)
         self.accept()

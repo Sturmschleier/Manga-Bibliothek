@@ -29,8 +29,9 @@ LOG_DIR = base_dir() / "LOG"
 CHANGELOG_FILE = LOG_DIR / "aenderungen.log"
 ARCHIVE_FILE = LOG_DIR / "aenderungen_archiv.log"
 ERROR_LOG_FILE = LOG_DIR / "fehler.log"
-RETENTION_DAYS = 182  # ~6 Monate (Standardwert, überschreibbar über config.json "log_retention_days")
-ISBN_LOG_PATTERN = "isbn_abgleich_*.log"
+RETENTION_DAYS = config.DEFAULTS["log_retention_days"]  # überschreibbar über config.json
+ISBN_LOG_PREFIX = "isbn_abgleich_"
+ISBN_LOG_PATTERN = ISBN_LOG_PREFIX + "*.log"
 ORDER_LOG_PREFIX = "bestellung_einlesen_"
 ORDER_LOG_PATTERN = ORDER_LOG_PREFIX + "*.log"
 
@@ -116,26 +117,41 @@ def prune_order_logs(keep: int = None) -> int:
     return _prune_logs(ORDER_LOG_PATTERN, keep)
 
 
-def write_order_log(lines: list) -> str:
-    """Schreibt das Protokoll eines Einlesens einer Bestellung als eigene
-    Datei LOG/bestellung_einlesen_<Datum>_<Uhrzeit>.log, räumt danach alte
-    Dateien weg (siehe prune_order_logs) und gibt den Pfad zurück. Löst
-    OSError aus, wenn nicht geschrieben werden kann."""
+def _write_log(prefix: str, lines: list) -> str:
+    """Schreibt `lines` als neue Datei LOG/<prefix><Datum>_<Uhrzeit>-<ms>.log
+    und gibt den Pfad zurück. Der Name ist immer größer als alle vorhandenen
+    mit demselben Präfix (das Aufräumen sortiert nach dem Namen) - auch wenn
+    mehrere Vorgänge in derselben Millisekunde schreiben. Löst OSError aus,
+    wenn nicht geschrieben werden kann."""
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    # Dateiname mit Datum, Uhrzeit und Millisekunden; der Name muss immer größer
-    # sein als alle vorhandenen (das Aufräumen sortiert nach dem Namen), auch
-    # wenn mehrere Vorgänge innerhalb derselben Millisekunde geschrieben werden.
-    newest = max((p.name for p in LOG_DIR.glob(ORDER_LOG_PATTERN)), default="")
+    newest = max((p.name for p in LOG_DIR.glob(prefix + "*.log")), default="")
     moment = datetime.now()
     while True:
-        name = f"{ORDER_LOG_PREFIX}{moment.strftime('%Y-%m-%d_%H-%M-%S')}-{moment.microsecond // 1000:03d}.log"
+        name = f"{prefix}{moment.strftime('%Y-%m-%d_%H-%M-%S')}-{moment.microsecond // 1000:03d}.log"
         if name > newest:
             break
         moment += timedelta(milliseconds=1)
     path = LOG_DIR / name
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    prune_order_logs()
     return str(path)
+
+
+def write_order_log(lines: list) -> str:
+    """Protokoll eines Einlesens einer Bestellung als eigene Datei
+    LOG/bestellung_einlesen_<Datum>_<Uhrzeit>-<ms>.log; räumt danach alte
+    Dateien weg (siehe prune_order_logs). Gibt den Pfad zurück."""
+    path = _write_log(ORDER_LOG_PREFIX, lines)
+    prune_order_logs()
+    return path
+
+
+def write_isbn_log(lines: list) -> str:
+    """Protokoll eines ISBN-Abgleichs als eigene Datei
+    LOG/isbn_abgleich_<Datum>_<Uhrzeit>-<ms>.log; räumt danach alte Dateien
+    weg (siehe prune_isbn_logs). Gibt den Pfad zurück."""
+    path = _write_log(ISBN_LOG_PREFIX, lines)
+    prune_isbn_logs()
+    return path
 
 
 def archive_old_entries(retention_days: int = None) -> int:

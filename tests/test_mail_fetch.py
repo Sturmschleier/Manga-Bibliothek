@@ -149,3 +149,24 @@ def test_settings_roundtrip_via_config(tmp_path, monkeypatch):
     mail_fetch.save_settings(s)
     assert mail_fetch.load_settings() == s
     assert "pw" not in (tmp_path / "config.json").read_text(encoding="utf-8")
+
+
+class FlakyIMAP(FakeIMAP):
+    """Wie FakeIMAP, aber der Inhalt von Nachricht "2" lässt sich nicht laden."""
+
+    def uid(self, command, *args):
+        if command == "FETCH" and args[0] == "2" and "HEADER" not in args[1]:
+            self.commands.append((command, args))
+            return "NO", [b"Nachricht nicht verfuegbar"]
+        return super().uid(command, *args)
+
+
+def test_single_broken_mail_does_not_abort_the_whole_fetch():
+    broken_charset = _mail("Bestellung").replace(b'charset="utf-8"', b'charset="x-gibt-es-nicht"')
+    server = FlakyIMAP({"1": _mail("Bestellung"), "2": _mail("Bestellung"), "3": broken_charset})
+    mails = mail_fetch.fetch_orders(_settings(), "pw", connect=lambda s: server)
+
+    by_uid = {m.uid: m for m in mails}
+    assert [i.name for i in by_uid["1"].items] == ["Sanda - Band 12", "Fabiniku 14"]   # die intakte Mail zählt
+    assert by_uid["2"].items == [] and "konnte nicht geladen werden" in by_uid["2"].error
+    assert by_uid["3"].items == [] and "nicht gelesen werden" in by_uid["3"].error
