@@ -108,6 +108,11 @@ def ja_nein_color(value: str):
     return JA_NEIN_COLORS.get(value.strip().lower())
 
 
+# Hellblaue Markierung des Titels: nächster Band bereits bestellt (siehe
+# order_mail.py / database.HIDDEN_COLUMNS "bestellt").
+BESTELLT_COLOR = "#BFE3FF"
+
+
 def zebra_color(row_index: int):
     return ZEBRA_EVEN if row_index % 2 == 0 else ZEBRA_ODD
 

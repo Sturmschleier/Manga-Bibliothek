@@ -59,3 +59,14 @@ def test_fresh_database_needs_no_backup(tmp_path, monkeypatch):
 
     assert not (tmp_path / "manga_library.db.vor-schema-v2.bak").exists()
     assert [e for e in db.load_all()] == []
+
+
+def test_hidden_column_bestellt_is_stored_but_not_a_visible_column(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_FILE", tmp_path / "manga_library.db")
+    db.init_db()
+    assert "bestellt" not in db.COLUMN_NAMES
+    assert "bestellt" in db.STORED_COLUMN_NAMES
+
+    loaded = db.replace_all([{"titel": "A", "bestellt": "1"}, {"titel": "B"}])
+    by_title = {e["titel"]: e["bestellt"] for e in loaded}
+    assert by_title == {"A": "1", "B": ""}
