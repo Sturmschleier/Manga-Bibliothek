@@ -1,4 +1,10 @@
-PySide6>=6.6.0
+# Laufzeit-Abhängigkeiten (Entwicklung, Tests). Für den exe-Build gelten die
+# exakt festgelegten Versionen aus requirements-build.txt.
+#
+# Von Qt wird nur QtCore/QtGui/QtWidgets genutzt - die stecken in
+# PySide6-Essentials. Das Paket "PySide6" zöge zusätzlich PySide6-Addons
+# (Web-Engine, 3D, Multimedia ..., mehrere hundert MB) nach.
+PySide6-Essentials>=6.6.0
 google-api-python-client>=2.0.0
 google-auth-httplib2>=0.1.0
 google-auth-oauthlib>=1.0.0

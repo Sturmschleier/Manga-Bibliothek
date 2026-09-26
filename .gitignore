@@ -6,6 +6,7 @@ __pycache__/
 # PyInstaller (build.bat)
 build/
 dist/
+.venv-build/
 
 # Persönliche Zugangsdaten (Google Drive) – nie einchecken
 credentials.json

@@ -636,7 +636,26 @@ aus erzeugen). Mitgeliefert ist dafür `build.bat`.
    cd mangalib
    build.bat
    ```
+   Beim ersten Mal legt `build.bat` eine eigene Build-Umgebung
+   `.venv-build` an (dauert einige Minuten), danach geht es schneller.
 3. Nach Abschluss liegt `dist\MangaLibrary.exe` bereit.
+
+**Reproduzierbar und schlank:**
+- **Eigene Umgebung, feste Versionen:** Gebaut wird in `.venv-build` mit
+  den exakt festgelegten Versionen aus `requirements-build.txt`. Jeder
+  Build enthält dieselben Bibliotheken, unabhängig davon, was im globalen
+  Python installiert ist. Wie man die Versionen aktualisiert, steht oben in
+  `requirements-build.txt`.
+- **Eine Bauanleitung:** Was in die exe kommt, steht ausschließlich in
+  `MangaLibrary.spec`; `build.bat` ruft nur PyInstaller damit auf.
+- **Nur, was das Programm braucht:**
+  - von Qt nur QtCore/QtGui/QtWidgets (Paket `PySide6-Essentials`, ohne
+    Web-Engine, 3D, Multimedia …)
+  - von den über 500 Google-API-Beschreibungen nur die für Google Drive
+  - Das hält die exe klein, und sie startet schneller: Eine exe aus einer
+    Datei entpackt sich bei jedem Start erst in einen temporären Ordner.
+- `build.bat --no-pause` wartet am Ende nicht auf einen Tastendruck – zum
+  Aufruf aus eigenen Skripten.
 4. `MangaLibrary.exe` in einen eigenen Ordner legen (z.B. Desktop) und
    von dort starten. `manga_library.db`, `credentials.json` und
    `token.json` legen sich automatisch **neben** die exe – die exe also
@@ -647,10 +666,10 @@ aus erzeugen). Mitgeliefert ist dafür `build.bat`.
 `credentials.json` (falls Google-Drive-Sync gewünscht ist) danach manuell
 in denselben Ordner wie `MangaLibrary.exe` legen.
 
-Falls beim Start der exe eine Fehlermeldung zu fehlenden Google-Modulen
-erscheint: `build.bat` erneut ausführen – das Skript bindet die
-Google-Bibliotheken bereits vollständig ein (`--collect-all`), das ist
-der häufigste Stolperstein beim exe-Bau mit diesen Bibliotheken.
+Falls die exe beim Start oder bei „Zu Google Drive sichern“ ein fehlendes
+Modul meldet: Das Modul in `MangaLibrary.spec` bei `hiddenimports`
+ergänzen und neu bauen. Unerwartete Fehler stehen mit allen Details in
+`LOG\fehler.log` neben der exe.
 
 ## Projektstruktur
 
@@ -683,8 +702,10 @@ mangalib/
 ├── order_mail.py       Bestell-E-Mail (.eml) lesen, Artikel den Einträgen zuordnen
 ├── mail_fetch.py       IMAP-Abruf von Bestellbestätigungen (anbieterunabhängig)
 ├── tests/              Automatisierte Tests (pytest)
-├── build.bat            PyInstaller-Buildskript (Windows) für die exe
+├── build.bat           Baut die exe (eigene Build-Umgebung, feste Versionen)
+├── MangaLibrary.spec   PyInstaller-Bauanleitung: was in die exe kommt
 ├── requirements.txt    Python-Laufzeit-Abhängigkeiten
+├── requirements-build.txt Exakte Versionen für den exe-Build
 ├── requirements-dev.txt Zusätzlich für Entwicklung: pytest, Ruff (Linter)
 ├── pyproject.toml      Konfiguration des Linters Ruff
 ├── .github/workflows/  Automatische Tests auf GitHub (CI)
