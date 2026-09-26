@@ -106,7 +106,12 @@ Nach dem Start:
    gesucht wurde) und auf den in der Konfiguration hinterlegten
    Online-Buchhändler verlinkt (Standard: Konold,
    `isbn_shop_name`/`isbn_shop_url_template` in `config.json` – siehe
-   Abschnitt „Zentrale Konfiguration“). Anders als in einer früheren
+   Abschnitt „Zentrale Konfiguration“). Im Dialog „ISBN-Abgleich /
+   Bestellliste“ gibt es dafür das Dropdown **„Bestellen bei:“**, in dem
+   alternativ **Thalia** (`https://www.thalia.de/suche?sq=<ISBN>`) oder
+   **Amazon** (`https://www.amazon.de/s?k=<ISBN>`) gewählt werden kann; die Auswahl wird dauerhaft
+   gemerkt (`isbn_shop_active`) und in der Bestellliste als Zeile
+   „Buchhändler: …“ ausgewiesen. Anders als in einer früheren
    Version übersteht die ISBN dadurch ein normales „💾 Speichern“ – sie
    bezieht sich aber weiterhin nur auf genau diesen Band-Stand: Ein
    „+1“-Klick auf „Bände (bis)“ lässt sie automatisch aus der
@@ -432,6 +437,7 @@ Neustart. Enthält u. a.:
 |---|---|---|
 | `isbn_shop_name` | Anzeigename des Buchhändlers für gefundene ISBNs | `Konold` |
 | `isbn_shop_url_template` | Link-Vorlage, `{isbn}` wird ersetzt | Konold-Shop |
+| `isbn_shop_active` | Zuletzt im ISBN-Dialog gewählter Buchhändler (`Konold`/Standard, `Thalia` oder `Amazon`); leer = Standard-Buchhändler | `""` |
 | `isbn_fallback_provider` | Suche bei nicht gefundener ISBN: `buchhandel.de` oder `manga-passion` | `buchhandel.de` |
 | `follow_selection_after_edit` | Startwert von „Nach Bearbeitung zur Zeile springen“ | `true` |
 | `sidebar_width_fraction` | Anteil der Fensterbreite für die Seitenleiste – **wirkt erst beim nächsten Programmstart** (bewusst so: eine bereits von Hand am Trenner verschobene Breite soll nicht ungefragt überschrieben werden) | `0.15` |

@@ -36,6 +36,7 @@ import requests
 from paths import base_dir
 import changelog
 import config
+import shops
 import sorting
 
 DNB_SRU_ENDPOINT = "https://services.dnb.de/sru/dnb"
@@ -715,16 +716,13 @@ def fill_missing_isbns(
 
 def konold_url(isbn: str) -> str:
     """
-    Verlinkt eine gefundene ISBN zum bevorzugten Online-Buchhändler.
-    Welcher das ist, ist über die zentrale Konfiguration (config.json,
-    Schlüssel "isbn_shop_url_template") dauerhaft einstellbar - Standard
-    ist Konold (konold.buchhandlung.de).
+    Verlinkt eine gefundene ISBN zum gewählten Online-Buchhändler (Name
+    historisch: Standard ist Konold). Welcher Anbieter gilt, wird im Dialog
+    "ISBN-Abgleich / Bestellliste" per Dropdown gewählt (z.B. Thalia) und in
+    config.json gemerkt; der Standard-Buchhändler selbst ist über
+    "isbn_shop_name"/"isbn_shop_url_template" einstellbar - siehe shops.py.
     """
-    template = config.get(
-        "isbn_shop_url_template",
-        "https://konold.buchhandlung.de/shop/action/productDetails?id={isbn}",
-    )
-    return template.format(isbn=isbn)
+    return shops.order_url(isbn)
 
 
 def bestellliste_markdown(
@@ -769,7 +767,7 @@ def bestellliste_markdown(
     zeilen.sort(key=lambda z: (z[0] or ""))
 
     titel_zeile = f"# Bestellliste {month:02d}/{year}" if only_month else f"# Bestellliste – VÖ +1 = {status}"
-    out = [titel_zeile, "", "| Datum | Titel | Verlag | Band | ISBN | Link |", "|---|---|---|---|---|---|"]
+    out = [titel_zeile, "", f"Buchhändler: {shops.active_name()}", "", "| Datum | Titel | Verlag | Band | ISBN | Link |", "|---|---|---|---|---|---|"]
     for datum, titel, verlag, band, isbn, link in zeilen:
         out.append(f"| {datum} | {titel} | {verlag} | {band} | {isbn} | [öffnen]({link}) |")
     return "\n".join(out)
