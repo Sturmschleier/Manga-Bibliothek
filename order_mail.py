@@ -15,6 +15,7 @@ je Artikel einer Zeile "Artikelname | Anzahl | Preis EUR". Andere Shops mit
 
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from email import policy
 from email.parser import BytesParser
 from html.parser import HTMLParser
@@ -202,6 +203,56 @@ def match_items(items, entries):
             seen.add((id(found.entry), item.kind))
             matches.append(found)
     return matches, already_owned, unmatched
+
+
+def build_log(source, mail_count, items, matches, new_matches, already_owned, unmatched,
+              problems=(), when=None) -> list:
+    """
+    Baut die Zeilen des Protokolls "Bestellung einlesen" (eine eigene
+    Logdatei je Vorgang, siehe changelog.write_order_log). Enthält nur
+    Artikel-/Titelnamen und Bandnummern - keine Adresse, Bestellnummer,
+    Preise oder Dateinamen der E-Mails. Artikel ohne passenden Eintrag
+    stehen in einem eigenen Abschnitt am Ende.
+    """
+    when = when or datetime.now()
+    kind_label = {KIND_ORDER: "bestellt", KIND_PICKUP: "abholbereit"}
+    already_marked = [m for m in matches if m not in new_matches]
+    new_ordered = [m for m in new_matches if m.item.kind == KIND_ORDER]
+    new_arrived = [m for m in new_matches if m.item.kind == KIND_PICKUP]
+
+    def section(title, rows, empty="(keine)"):
+        out = ["", f"--- {title} ({len(rows)}) ---"]
+        out += rows if rows else [f"  {empty}"]
+        return out
+
+    def match_row(m):
+        return f"  {m.entry.get('titel')} | Band {m.band} | Artikel: {m.item.name}"
+
+    lines = [
+        "=" * 78,
+        f"Bestellung einlesen - {when.strftime('%d.%m.%Y %H:%M:%S')}",
+        "=" * 78,
+        f"{'Quelle:':<26}{source}",
+        f"{'E-Mails:':<26}{mail_count}",
+        f"{'Artikel:':<26}{len(items)}",
+        f"{'Titel zugeordnet:':<26}{len(matches) + len(already_owned)}",
+        f"{'Ohne passenden Eintrag:':<26}{len(unmatched)}",
+    ]
+    lines += section("Neu als bestellt markiert (hellblau)", [match_row(m) for m in new_ordered])
+    lines += section("Neu als angekommen markiert (roter Balken)", [match_row(m) for m in new_arrived])
+    lines += section("Bereits markiert (unverändert)", [match_row(m) for m in already_marked])
+    lines += section(
+        "Bereits im Bestand (nicht markiert)",
+        [f"  {m.entry.get('titel')} | Band {m.band} | Bände (bis) = {m.entry.get('baende_bis')}" for m in already_owned],
+    )
+    if problems:
+        lines += section("Nicht lesbare Dateien", [f"  {p}" for p in problems])
+    lines += section(
+        "ARTIKEL OHNE PASSENDEN EINTRAG",
+        [f"  {i.name} | Menge {i.menge} | {kind_label.get(i.kind, i.kind)}" for i in unmatched],
+    )
+    lines.append("")
+    return lines
 
 
 def _as_int(value) -> Optional[int]:

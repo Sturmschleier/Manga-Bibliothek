@@ -85,3 +85,22 @@ def test_config_get_int_falls_back_on_garbage(tmp_path, monkeypatch):
     assert config.get_int("isbn_log_keep") == 10
     config.set_value("isbn_log_keep", "7")
     assert config.get_int("isbn_log_keep") == 7
+
+
+def test_write_order_log_creates_file_and_keeps_only_configured_number(log_env):
+    config.set_value("order_log_keep", 3)
+    paths = [changelog.write_order_log([f"Vorgang {i}"]) for i in range(6)]
+    files = sorted(p.name for p in log_env.glob("bestellung_einlesen_*.log"))
+    assert len(files) == 3                                     # nur die neuesten 3 bleiben liegen
+    assert all(f.startswith("bestellung_einlesen_") for f in files)
+    assert (log_env / files[-1]).read_text(encoding="utf-8").strip() == "Vorgang 5"
+    assert len(set(paths)) == 6                                # gleiche Sekunde überschreibt nichts
+
+
+def test_order_log_default_keep_is_ten_and_other_logs_untouched(log_env):
+    for i in range(14):
+        (log_env / f"bestellung_einlesen_2026-09-{i + 1:02d}_10-00-00.log").write_text("x")
+    _isbn_logs(log_env, 12)
+    assert changelog.prune_order_logs() == 4
+    assert len(list(log_env.glob("bestellung_einlesen_*.log"))) == 10
+    assert len(list(log_env.glob("isbn_abgleich_*.log"))) == 12   # ISBN-Logs haben ihre eigene Grenze

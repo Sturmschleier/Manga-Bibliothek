@@ -142,3 +142,32 @@ def test_order_and_pickup_for_same_title_are_both_kept():
     ]
     matches, _, _ = order_mail.match_items(items, entries)
     assert sorted(m.item.kind for m in matches) == sorted([order_mail.KIND_ORDER, order_mail.KIND_PICKUP])
+
+
+def test_build_log_has_separate_section_for_unmatched_articles_and_no_personal_data():
+    entries = [_entry("Sanda", 11), _entry("Fabiniku", 14)]
+    items = [
+        order_mail.OrderItem("Sanda - Band 12"),
+        order_mail.OrderItem("Fabiniku 14"),                      # Band schon im Bestand
+        order_mail.OrderItem("Sonderedition Schuber Deluxe", 2),  # ohne Eintrag
+    ]
+    matches, owned, unmatched = order_mail.match_items(items, entries)
+    lines = order_mail.build_log("Postfach (IMAP)", 1, items, matches, matches, owned, unmatched,
+                                 problems=["Datei 2: keine Artikelliste"])
+    text = "\n".join(lines)
+    assert "Quelle:                   Postfach (IMAP)" in text
+    assert "Sanda | Band 12 | Artikel: Sanda - Band 12" in text
+    assert "Fabiniku | Band 14 | Bände (bis) = 14" in text
+    assert "--- Nicht lesbare Dateien (1) ---" in text
+    # der eigene Abschnitt für Artikel ohne Eintrag steht am Ende
+    head, _, tail = text.partition("--- ARTIKEL OHNE PASSENDEN EINTRAG (1) ---")
+    assert "Sonderedition Schuber Deluxe | Menge 2 | bestellt" in tail
+    assert "Sonderedition" not in head
+
+
+def test_build_log_lists_none_when_everything_matched():
+    entries = [_entry("Sanda", 11)]
+    items = [order_mail.OrderItem("Sanda - Band 12")]
+    matches, owned, unmatched = order_mail.match_items(items, entries)
+    text = "\n".join(order_mail.build_log("Datei", 1, items, matches, matches, owned, unmatched))
+    assert "--- ARTIKEL OHNE PASSENDEN EINTRAG (0) ---\n  (keine)" in text
