@@ -1,25 +1,43 @@
 @echo off
 REM build.bat
-REM Erstellt eine eigenstaendige MangaLibrary.exe (Windows) mit PyInstaller.
-REM Muss auf einem Windows-Rechner mit installiertem Python ausgefuehrt werden
-REM (PyInstaller kann nicht "fuer Windows" von einem anderen Betriebssystem
-REM aus bauen - die exe muss auf Windows selbst entstehen).
+REM Baut MangaLibrary.exe (Windows) mit PyInstaller - reproduzierbar:
+REM   - in einer eigenen Build-Umgebung .venv-build (unabhaengig davon, was im
+REM     globalen Python installiert ist)
+REM   - mit exakt festgelegten Versionen aus requirements-build.txt
+REM   - nach der Bauanleitung MangaLibrary.spec (dort steht, was in die exe kommt)
+REM
+REM Aufruf:   build.bat              wartet am Ende auf einen Tastendruck
+REM           build.bat --no-pause   z.B. aus einem anderen Skript heraus
+REM Ergebnis: dist\MangaLibrary.exe
+REM
+REM Muss auf Windows laufen (eine Windows-exe laesst sich nicht von einem
+REM anderen Betriebssystem aus bauen).
 
-python -m pip install -r requirements.txt
-python -m pip install pyinstaller
+setlocal
+cd /d "%~dp0"
+set "VENV=.venv-build"
 
-python -m PyInstaller --noconfirm --onefile --windowed --name "MangaLibrary" ^
-    --collect-all PySide6 ^
-    --collect-all googleapiclient ^
-    --collect-all google_auth_oauthlib ^
-    --collect-all google_auth_httplib2 ^
-    --hidden-import googleapiclient.discovery_cache.file ^
-    --hidden-import keyring.backends.Windows ^
-    main.py
+if not exist "%VENV%\Scripts\python.exe" (
+    echo Lege die Build-Umgebung %VENV% an ...
+    python -m venv "%VENV%" || goto :fehler
+)
+
+echo Installiere die festgelegten Versionen aus requirements-build.txt ...
+"%VENV%\Scripts\python.exe" -m pip install --disable-pip-version-check --quiet -r requirements-build.txt || goto :fehler
+
+echo Baue MangaLibrary.exe ...
+"%VENV%\Scripts\python.exe" -m PyInstaller --noconfirm --clean MangaLibrary.spec || goto :fehler
 
 echo.
-echo Fertig! Die Datei dist\MangaLibrary.exe ist eigenstaendig.
-echo Wichtig: manga_library.db, credentials.json und token.json legen sich
-echo automatisch NEBEN die exe - also die exe nicht isoliert verschieben,
+echo Fertig! dist\MangaLibrary.exe ist eigenstaendig.
+echo Wichtig: manga_library.db, config.json, credentials.json und token.json legen sich
+echo automatisch NEBEN die exe - die exe also nicht isoliert verschieben,
 echo sondern immer aus ihrem eigenen Ordner heraus starten.
-pause
+if /i not "%~1"=="--no-pause" pause
+exit /b 0
+
+:fehler
+echo.
+echo FEHLER: Der Build ist fehlgeschlagen (siehe Meldungen oben).
+if /i not "%~1"=="--no-pause" pause
+exit /b 1

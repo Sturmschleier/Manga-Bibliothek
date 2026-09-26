@@ -1,0 +1,54 @@
+# Exakte Versionen für den exe-Build (build.bat) - damit jeder Build dieselben
+# Bibliotheken enthält, egal was gerade im globalen Python installiert ist.
+# Erzeugt am 2026-09-26 mit Python 3.14 unter Windows aus requirements.txt +
+# PyInstaller.
+#
+# Aktualisieren (z.B. für neuere Versionen oder ein anderes Python):
+#   rmdir /s /q .venv-build
+#   python -m venv .venv-build
+#   .venv-build\Scripts\python -m pip install -r requirements.txt pyinstaller
+#   .venv-build\Scripts\python -m pip freeze > requirements-build.txt
+# danach diesen Kopf wieder einfügen, bauen und die exe kurz testen.
+
+# Programm
+PySide6_Essentials==6.11.2
+shiboken6==6.11.2
+google-api-python-client==2.200.0
+google-api-core==2.39.0
+google-auth==2.58.1
+google-auth-httplib2==0.4.2
+google-auth-oauthlib==1.4.1
+googleapis-common-protos==1.75.4
+httplib2==0.32.0
+oauthlib==3.3.1
+requests-oauthlib==2.0.0
+proto-plus==1.28.4
+protobuf==7.36.2
+pyasn1==0.6.4
+pyasn1_modules==0.4.2
+pyparsing==3.3.3
+uritemplate==4.2.0
+opentelemetry-api==1.45.0
+typing_extensions==4.16.0
+requests==2.34.2
+certifi==2026.7.22
+charset-normalizer==3.5.1
+idna==3.20
+urllib3==2.8.0
+cryptography==50.0.1
+cffi==2.1.1
+pycparser==3.0
+keyring==25.7.0
+jaraco.classes==3.4.0
+jaraco.context==6.1.2
+jaraco.functools==4.6.0
+more-itertools==11.1.0
+pywin32-ctypes==0.2.3
+
+# Build-Werkzeug
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.7
+altgraph==0.17.5
+pefile==2024.8.26
+packaging==26.3
+setuptools==84.0.0
