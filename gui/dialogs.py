@@ -9,9 +9,19 @@ import json
 from datetime import date
 
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QFormLayout, QHBoxLayout, QLabel,
-    QLineEdit, QMessageBox, QPlainTextEdit, QPushButton, QRadioButton,
-    QSpinBox, QVBoxLayout,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QRadioButton,
+    QSpinBox,
+    QVBoxLayout,
 )
 
 import config
@@ -20,6 +30,7 @@ import logic
 import shops
 
 from .constants import JA_NEIN_OPTIONEN, TYP_OPTIONEN
+
 
 class EntryDialog(QDialog):
     """Formular zum Anlegen/Bearbeiten eines einzelnen Werks (alle Spalten).

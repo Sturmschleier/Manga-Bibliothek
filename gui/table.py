@@ -16,8 +16,13 @@ import colors
 import config
 
 from .constants import (
-    BAR_COLOR_ROLE, INCREMENTABLE_COLUMNS, PLUS_BTN_MARGIN, PLUS_BTN_WIDTH,
-    ROW_ID_ROLE, RUCKSTAND_COLUMN, _ruckstand_value,
+    BAR_COLOR_ROLE,
+    INCREMENTABLE_COLUMNS,
+    PLUS_BTN_MARGIN,
+    PLUS_BTN_WIDTH,
+    ROW_ID_ROLE,
+    RUCKSTAND_COLUMN,
+    _ruckstand_value,
 )
 
 
@@ -170,20 +175,23 @@ class CellDelegate(QStyledItemDelegate):
 
     def editorEvent(self, event, model, option, index):
         col = self.columns[index.column()]
-        if col in INCREMENTABLE_COLUMNS and event.type() == QEvent.MouseButtonRelease:
-            if self._plus_rect(option).contains(event.position().toPoint()):
-                row_id = index.data(ROW_ID_ROLE)
-                key = (row_id, col)
-                now = time.monotonic()
-                # Bei einem Doppelklick feuert mouseReleaseEvent (und damit
-                # dieses editorEvent) zweimal - einmal je Klick. Ohne diese
-                # Absicherung würde das ein doppeltes Erhöhen auslösen.
-                if now - self._last_click.get(key, 0.0) < QApplication.doubleClickInterval() / 1000:
-                    return True
-                self._last_click[key] = now
-                if col == "baende_bis":
-                    self.on_increment_baende(row_id)
-                else:
-                    self.on_increment_gelesen(row_id)
+        if (
+            col in INCREMENTABLE_COLUMNS
+            and event.type() == QEvent.MouseButtonRelease
+            and self._plus_rect(option).contains(event.position().toPoint())
+        ):
+            row_id = index.data(ROW_ID_ROLE)
+            key = (row_id, col)
+            now = time.monotonic()
+            # Bei einem Doppelklick feuert mouseReleaseEvent (und damit
+            # dieses editorEvent) zweimal - einmal je Klick. Ohne diese
+            # Absicherung würde das ein doppeltes Erhöhen auslösen.
+            if now - self._last_click.get(key, 0.0) < QApplication.doubleClickInterval() / 1000:
                 return True
+            self._last_click[key] = now
+            if col == "baende_bis":
+                self.on_increment_baende(row_id)
+            else:
+                self.on_increment_gelesen(row_id)
+            return True
         return False

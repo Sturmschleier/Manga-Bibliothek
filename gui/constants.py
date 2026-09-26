@@ -70,7 +70,7 @@ def _voe1_category(value):
 # der Datenbank - wird bei jeder Anzeige live aus den beiden echten Feldern
 # berechnet.
 RUCKSTAND_COLUMN = "ruckstand"
-DISPLAY_COLUMNS = list(db.COLUMN_NAMES) + [RUCKSTAND_COLUMN]
+DISPLAY_COLUMNS = [*db.COLUMN_NAMES, RUCKSTAND_COLUMN]
 DISPLAY_LABELS = dict(db.LABELS)
 DISPLAY_LABELS[RUCKSTAND_COLUMN] = "Rückstand"
 

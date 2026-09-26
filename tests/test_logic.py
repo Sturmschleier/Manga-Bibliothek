@@ -6,7 +6,6 @@ Reine Funktionen ohne Datenbank-/GUI-Abhängigkeit.
 
 import logic
 
-
 # --------------------------------------------------------------- increment_baende
 
 def test_increment_baende_shifts_voe_columns_forward():

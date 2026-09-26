@@ -65,7 +65,7 @@ class FakeIMAP:
 
 
 def _settings(**kw):
-    base = dict(host="imap.example.org", user="me@example.org", sender="konold", subject="Bestellung")
+    base = {"host": "imap.example.org", "user": "me@example.org", "sender": "konold", "subject": "Bestellung"}
     base.update(kw)
     return mail_fetch.MailSettings(**base)
 
@@ -96,7 +96,8 @@ def test_search_uses_ascii_date_and_sender_filter():
 
 
 def test_mail_without_article_list_is_reported_with_error():
-    server = FakeIMAP({"1": _mail("Bestellung versendet", html="<html><body><p>Ihr Paket ist unterwegs</p></body></html>")})
+    shipping_note = "<html><body><p>Ihr Paket ist unterwegs</p></body></html>"
+    server = FakeIMAP({"1": _mail("Bestellung versendet", html=shipping_note)})
     mails = mail_fetch.fetch_orders(_settings(), "pw", connect=lambda s: server)
     assert len(mails) == 1 and mails[0].items == [] and mails[0].error
 

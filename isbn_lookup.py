@@ -899,7 +899,8 @@ def fill_missing_isbns(
         "=" * 78,
         f"ISBN-Abgleich - gestartet {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}",
         f"Datenbank:          {db_path}",
-        f"Einträge aus:       {'Zwischenspeicher (auch ungespeicherte Änderungen)' if entries is not None else 'Datenbank'}",
+        "Einträge aus:       "
+        + ("Zwischenspeicher (auch ungespeicherte Änderungen)" if entries is not None else "Datenbank"),
         f"Auswahl (VÖ +1):    {auswahl_label}",
         "=" * 78,
         "",
@@ -1060,12 +1061,14 @@ def bestellliste_markdown(
         prefix = f"| {cell(row['voe_1'])} | {marker}"
         suffix = f" | {cell(row['verlag'])} | {cell(band)} |"
         if row["cached_isbn"]:
-            zeilen = [f"{prefix}{cell(row['titel'])}{suffix} {row['cached_isbn']} | [öffnen]({shops.order_url(row['cached_isbn'])}) |"]
+            isbn = row["cached_isbn"]
+            zeilen = [f"{prefix}{cell(row['titel'])}{suffix} {isbn} | [öffnen]({shops.order_url(isbn)}) |"]
         else:
             zeilen = [f"{prefix}{cell(row['titel'])}{suffix} — | [öffnen]({fallback_search_url(row['titel'])}) |"]
         for s in row_specials:
             zeilen.append(
-                f"{prefix}↳ Sonderausgabe: {cell(s['bezeichnung'])}{suffix} {s['isbn']} | [öffnen]({shops.order_url(s['isbn'])}) |"
+                f"{prefix}↳ Sonderausgabe: {cell(s['bezeichnung'])}{suffix} {s['isbn']} "
+                f"| [öffnen]({shops.order_url(s['isbn'])}) |"
             )
         # Chronologisch nach VÖ +1 (echte Datumswerte, nicht als Text - sonst
         # stünde "5.09.2026" hinter "15.09.2026"), bei gleichem Datum nach Titel
@@ -1073,7 +1076,10 @@ def bestellliste_markdown(
     gruppen.sort(key=lambda g: g[0])
 
     titel_zeile = f"# Bestellliste {month:02d}/{year}" if only_month else f"# Bestellliste – VÖ +1 = {status}"
-    out = [titel_zeile, "", f"Buchhändler: {shops.active_name()}", "", "| Datum | Titel | Verlag | Band | ISBN | Link |", "|---|---|---|---|---|---|"]
+    out = [
+        titel_zeile, "", f"Buchhändler: {shops.active_name()}", "",
+        "| Datum | Titel | Verlag | Band | ISBN | Link |", "|---|---|---|---|---|---|",
+    ]
     for _key, zeilen in gruppen:
         out.extend(zeilen)
     return "\n".join(out)

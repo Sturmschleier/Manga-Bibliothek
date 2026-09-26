@@ -32,7 +32,7 @@ DEFAULTS = {
     "isbn_fallback_provider": "buchhandel.de",
     # Protokolle (LOG-Ordner, siehe changelog.py)
     "isbn_log_keep": 10,        # so viele ISBN-Abgleich-Logdateien bleiben liegen (die ältesten werden gelöscht)
-    "order_log_keep": 10,       # so viele Logdateien "Bestellung einlesen" bleiben liegen (die ältesten werden gelöscht)
+    "order_log_keep": 10,       # so viele Logdateien "Bestellung einlesen" bleiben liegen (älteste werden gelöscht)
     "log_retention_days": 182,  # Änderungsprotokoll: Einträge älter als N Tage wandern ins Archiv
     # Datenbank-Sicherungen (BACKUP-Ordner, siehe database.create_backup): vor
     # jedem Speichern und vor einem Google-Drive-Download
@@ -146,7 +146,9 @@ def validate(cfg: dict) -> list[str]:
     Fehlermeldungen zurück, leere Liste = in Ordnung.
     """
     problems = []
-    type_names = {bool: "true oder false", int: "eine ganze Zahl", float: "eine Zahl", str: "ein Text in Anführungszeichen"}
+    type_names = {
+        bool: "true oder false", int: "eine ganze Zahl", float: "eine Zahl", str: "ein Text in Anführungszeichen",
+    }
     for key, default in DEFAULTS.items():
         if key not in cfg:
             continue
@@ -178,7 +180,7 @@ def get(key: str, default=None):
     return load().get(key, DEFAULTS.get(key, default))
 
 
-def get_float(key: str, default: float = None) -> float:
+def get_float(key: str, default: Optional[float] = None) -> float:
     """
     Wie `get()`, aber typsicher für Zahlenwerte: liefert immer ein `float`
     zurück. Enthält config.json für `key` einen nicht-numerischen Wert
@@ -196,7 +198,7 @@ def get_float(key: str, default: float = None) -> float:
         return default
 
 
-def get_int(key: str, default: int = None) -> int:
+def get_int(key: str, default: Optional[int] = None) -> int:
     """Wie `get()`, aber typsicher für ganze Zahlen: liefert immer ein `int`
     (bei Unsinn in der Datei den Standardwert statt einer Exception)."""
     if default is None:
@@ -207,7 +209,7 @@ def get_int(key: str, default: int = None) -> int:
         return default
 
 
-def get_bool(key: str, default: bool = None) -> bool:
+def get_bool(key: str, default: Optional[bool] = None) -> bool:
     """Wie `get()`, aber typsicher für Ja/Nein-Werte: true/false, aber auch
     von Hand eingetragene Texte wie "false" oder "ja" werden richtig
     verstanden (der Text "false" wäre in Python sonst wahr). Bei Unsinn
@@ -225,7 +227,7 @@ def get_bool(key: str, default: bool = None) -> bool:
     return default
 
 
-def get_dict(key: str, default: dict = None) -> dict:
+def get_dict(key: str, default: Optional[dict] = None) -> dict:
     """Wie `get()`, aber typsicher für Dict-Werte (z.B. "colors_enabled").
     Ist der gespeicherte Wert kein Dict, wird der Standardwert verwendet."""
     if default is None:

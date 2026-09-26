@@ -21,6 +21,7 @@ protokolliert.
 """
 
 from datetime import datetime, timedelta
+from typing import Optional
 
 import config
 from paths import base_dir
@@ -101,7 +102,7 @@ def _prune_logs(pattern: str, keep: int) -> int:
     return deleted
 
 
-def prune_isbn_logs(keep: int = None) -> int:
+def prune_isbn_logs(keep: Optional[int] = None) -> int:
     """Begrenzt LOG/isbn_abgleich_*.log auf die neuesten `keep` Dateien
     (Standard: config.json "isbn_log_keep", 10)."""
     if keep is None:
@@ -109,7 +110,7 @@ def prune_isbn_logs(keep: int = None) -> int:
     return _prune_logs(ISBN_LOG_PATTERN, keep)
 
 
-def prune_order_logs(keep: int = None) -> int:
+def prune_order_logs(keep: Optional[int] = None) -> int:
     """Begrenzt LOG/bestellung_einlesen_*.log auf die neuesten `keep` Dateien
     (Standard: config.json "order_log_keep", 10)."""
     if keep is None:
@@ -154,7 +155,7 @@ def write_isbn_log(lines: list) -> str:
     return path
 
 
-def archive_old_entries(retention_days: int = None) -> int:
+def archive_old_entries(retention_days: Optional[int] = None) -> int:
     """
     Verschiebt Einträge, die älter als `retention_days` sind, aus der
     laufenden Log-Datei in die Archiv-Datei (angehängt, nicht überschrieben).

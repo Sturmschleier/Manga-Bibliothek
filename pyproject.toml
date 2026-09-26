@@ -1,0 +1,41 @@
+# Konfiguration der Entwicklungswerkzeuge. Das Programm selbst wird nicht als
+# Paket installiert (Start über main.py bzw. die mit build.bat gebaute exe).
+
+[tool.ruff]
+# älteste laut README unterstützte Version - Ruff schlägt nur vor, was dort läuft
+target-version = "py39"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "F",    # Pyflakes: echte Fehler wie ungenutzte Importe, undefinierte Namen
+    "E",    # pycodestyle: Fehler
+    "W",    # pycodestyle: Warnungen
+    "B",    # flake8-bugbear: typische Fallstricke
+    "BLE",  # flake8-blind-except: pauschales "except Exception" nur mit Begründung (noqa)
+    "I",    # isort: Reihenfolge der Importe
+    "UP",   # pyupgrade: veraltete Schreibweisen
+    "SIM",  # flake8-simplify: vereinfachbarer Code
+    "C4",   # flake8-comprehensions
+    "PIE",  # flake8-pie: überflüssige Konstrukte
+    "RUF",  # Ruff-eigene Regeln
+]
+ignore = [
+    # Deutsche Anführungszeichen „…“ und der Gedankenstrich „–“ in Texten sind gewollt
+    "RUF001", "RUF002", "RUF003",
+    # Optional[X] bleibt einheitlich: "X | None" ginge mit Python 3.9 nur in
+    # Dateien mit "from __future__ import annotations"
+    "UP007", "UP045",
+    # try/except/pass mit erklärendem Kommentar ist hier lesbarer als contextlib.suppress
+    "SIM105",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Qt-Konvention: parent=QModelIndex() als Standardwert in Modell-Methoden
+"gui/table.py" = ["B008"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "changelog", "colors", "config", "csv_export", "database", "drive_sync", "gui", "import_csv",
+    "isbn_lookup", "library", "logic", "mail_fetch", "main", "models", "order_mail", "paths", "shops", "sorting",
+]

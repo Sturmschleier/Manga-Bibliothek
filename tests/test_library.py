@@ -114,7 +114,10 @@ def test_import_of_only_known_titles_is_no_change():
 def test_apply_order_matches_sets_band_numbers_as_one_undo_step():
     b = _buffer()
     matches, _, _ = order_mail.match_items(
-        [order_mail.OrderItem("Sanda - Band 14"), order_mail.OrderItem("Blue Lock - Band 31", kind=order_mail.KIND_PICKUP)],
+        [
+            order_mail.OrderItem("Sanda - Band 14"),
+            order_mail.OrderItem("Blue Lock - Band 31", kind=order_mail.KIND_PICKUP),
+        ],
         b.data,
     )
     new = b.apply_order_matches(matches)
@@ -134,10 +137,9 @@ def test_clear_marks():
 
 def test_exception_inside_change_restores_previous_state():
     b = _buffer()
-    with pytest.raises(RuntimeError):
-        with b.change():
-            b.data.append({"id": 99, "titel": "halb"})
-            raise RuntimeError("Fehler mitten in der Aktion")
+    with pytest.raises(RuntimeError), b.change():
+        b.data.append({"id": 99, "titel": "halb"})
+        raise RuntimeError("Fehler mitten in der Aktion")
     assert b.find(99) is None and not b.can_undo
 
 

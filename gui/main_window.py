@@ -26,10 +26,27 @@ from datetime import date
 from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
-    QAbstractItemView, QComboBox, QFileDialog, QFrame,
-    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QMainWindow, QMenu,
-    QInputDialog, QMessageBox, QPlainTextEdit, QProgressDialog, QPushButton, QSizePolicy,
-    QSplitter, QTableView, QVBoxLayout, QWidget,
+    QAbstractItemView,
+    QComboBox,
+    QFileDialog,
+    QFrame,
+    QHBoxLayout,
+    QHeaderView,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QPlainTextEdit,
+    QProgressDialog,
+    QPushButton,
+    QSizePolicy,
+    QSplitter,
+    QTableView,
+    QVBoxLayout,
+    QWidget,
 )
 
 import changelog
@@ -45,9 +62,17 @@ import sorting
 from library import LibraryBuffer
 
 from .constants import (
-    APP_TITLE, COL_DEFAULT_WIDTHS, DISPLAY_COLUMNS, DISPLAY_LABELS,
-    INCREMENTABLE_COLUMNS, ROW_ID_ROLE, RUCKSTAND_COLUMN,
-    VOE1_FILTER_OPTIONS, _entry_voe_dates, _ruckstand_value, _voe1_category,
+    APP_TITLE,
+    COL_DEFAULT_WIDTHS,
+    DISPLAY_COLUMNS,
+    DISPLAY_LABELS,
+    INCREMENTABLE_COLUMNS,
+    ROW_ID_ROLE,
+    RUCKSTAND_COLUMN,
+    VOE1_FILTER_OPTIONS,
+    _entry_voe_dates,
+    _ruckstand_value,
+    _voe1_category,
 )
 from .dialogs import ConfigDialog, EntryDialog, IsbnLookupDialog
 from .isbn_view import IsbnResultWindow
@@ -840,7 +865,8 @@ class MangaLibraryApp(QMainWindow):
                 return (v is None, v if v is not None else 0)
             rows.sort(key=_key, reverse=self.sort_reverse)
         else:
-            rows.sort(key=lambda e: sorting.sort_key(self.sort_column, e.get(self.sort_column)), reverse=self.sort_reverse)
+            column = self.sort_column
+            rows.sort(key=lambda e: sorting.sort_key(column, e.get(column)), reverse=self.sort_reverse)
         return rows
 
     def refresh(self):

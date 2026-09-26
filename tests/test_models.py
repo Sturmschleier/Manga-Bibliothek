@@ -50,7 +50,7 @@ def test_werk_from_dict_ignores_unknown_keys():
 
 
 def test_werk_to_dict_round_trip():
-    original = {c: "" for c in db.STORED_COLUMN_NAMES}
+    original = dict.fromkeys(db.STORED_COLUMN_NAMES, "")
     original.update({"id": 42, "titel": "Testreihe", "verlag": "Carlsen Manga"})
     werk = Werk.from_dict(original)
     result = werk.to_dict()

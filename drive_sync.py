@@ -79,7 +79,7 @@ def _login():
     flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
     try:
         creds = flow.run_local_server(port=0, timeout_seconds=LOGIN_TIMEOUT_SECONDS)
-    except Exception as exc:  # noqa: BLE001 - Zeitüberschreitung, abgelehnte Anmeldung ...
+    except Exception as exc:
         raise DriveSyncError(
             f"Die Google-Anmeldung wurde nicht abgeschlossen ({exc}). Bitte erneut versuchen "
             f"und die Anmeldung im Browser innerhalb von {LOGIN_TIMEOUT_SECONDS // 60} Minuten bestätigen."
