@@ -19,6 +19,7 @@ def log_env(tmp_path, monkeypatch):
     monkeypatch.setattr(changelog, "LOG_DIR", log_dir)
     monkeypatch.setattr(changelog, "CHANGELOG_FILE", log_dir / "aenderungen.log")
     monkeypatch.setattr(changelog, "ARCHIVE_FILE", log_dir / "aenderungen_archiv.log")
+    monkeypatch.setattr(changelog, "ERROR_LOG_FILE", log_dir / "fehler.log")
     monkeypatch.setattr(config, "CONFIG_FILE", tmp_path / "config.json")
     return log_dir
 
@@ -104,3 +105,16 @@ def test_order_log_default_keep_is_ten_and_other_logs_untouched(log_env):
     assert changelog.prune_order_logs() == 4
     assert len(list(log_env.glob("bestellung_einlesen_*.log"))) == 10
     assert len(list(log_env.glob("isbn_abgleich_*.log"))) == 12   # ISBN-Logs haben ihre eigene Grenze
+
+
+def test_log_error_appends_traceback_with_timestamp(log_env):
+    path = changelog.log_error("Traceback …\nValueError: kaputt\n")
+    changelog.log_error("Traceback …\nKeyError: weg")
+    text = (log_env / "fehler.log").read_text(encoding="utf-8")
+    assert path == str(log_env / "fehler.log")
+    assert text.startswith("[") and "ValueError: kaputt" in text and "KeyError: weg" in text
+
+
+def test_log_error_returns_none_if_not_writable(log_env, monkeypatch):
+    monkeypatch.setattr(changelog, "ERROR_LOG_FILE", log_env)  # ein Ordner lässt sich nicht als Datei öffnen
+    assert changelog.log_error("x") is None

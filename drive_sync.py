@@ -14,6 +14,10 @@ Voraussetzung (siehe README.md):
 Die Datenbank wird in Drive in einem Ordner "MangaLibrary" unter dem Namen
 "manga_library.db" abgelegt. Es wird immer dieselbe Datei aktualisiert
 (kein Duplikat pro Sync).
+
+Beim Herunterladen wird die lokale Datenbank erst ersetzt, wenn die Datei
+vollständig angekommen und als intakte Datenbank geprüft ist; die bisherige
+lokale Datenbank wird vorher nach BACKUP/ gesichert (siehe download()).
 """
 
 from google.auth.transport.requests import Request
@@ -22,6 +26,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
+import database as db
 from paths import base_dir
 
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
@@ -29,7 +34,6 @@ SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 BASE_DIR = base_dir()
 CREDENTIALS_FILE = BASE_DIR / "credentials.json"
 TOKEN_FILE = BASE_DIR / "token.json"
-DB_FILE = BASE_DIR / "manga_library.db"
 DRIVE_FOLDER_NAME = "MangaLibrary"
 DRIVE_FILE_NAME = "manga_library.db"
 
@@ -93,32 +97,62 @@ def _find_db_file_id(service, folder_id):
 
 def upload():
     """Lädt die lokale DB-Datei nach Google Drive hoch (erstellt oder aktualisiert)."""
-    if not DB_FILE.exists():
+    if not db.DB_FILE.exists():
         raise DriveSyncError("Es existiert noch keine lokale Datenbank zum Hochladen.")
 
     service = _get_service()
     folder_id = _find_folder_id(service)
     file_id = _find_db_file_id(service, folder_id)
-    media = MediaFileUpload(str(DB_FILE), mimetype="application/x-sqlite3", resumable=True)
+    media = MediaFileUpload(str(db.DB_FILE), mimetype="application/x-sqlite3", resumable=True)
 
-    if file_id:
-        service.files().update(fileId=file_id, media_body=media).execute()
-    else:
-        metadata = {"name": DRIVE_FILE_NAME, "parents": [folder_id]}
-        service.files().create(body=metadata, media_body=media, fields="id").execute()
+    try:
+        if file_id:
+            service.files().update(fileId=file_id, media_body=media).execute()
+        else:
+            metadata = {"name": DRIVE_FILE_NAME, "parents": [folder_id]}
+            service.files().create(body=metadata, media_body=media, fields="id").execute()
+    finally:
+        # MediaFileUpload hält die Datei sonst offen, bis es vom Garbage
+        # Collector eingesammelt wird - unter Windows würde das ein späteres
+        # Ersetzen der Datenbankdatei (download()) blockieren.
+        media.stream().close()
 
 
 def download():
-    """Lädt die DB-Datei von Google Drive herunter und überschreibt die lokale Datei."""
+    """
+    Lädt die DB-Datei von Google Drive herunter und ersetzt damit die lokale
+    Datenbank.
+
+    Heruntergeladen wird zunächst in eine temporäre Datei neben der
+    Datenbank. Erst wenn sie vollständig ist und sich als intakte
+    Bibliotheks-Datenbank erweist, wird die bisherige lokale Datenbank nach
+    BACKUP/ gesichert und ersetzt (siehe database.replace_database_file).
+    Bricht der Download ab oder ist die Datei unbrauchbar, bleibt die lokale
+    Datenbank unverändert.
+
+    Gibt den Pfad der Sicherung der bisherigen lokalen Datenbank zurück
+    (oder None, wenn es noch keine gab).
+    """
     service = _get_service()
     folder_id = _find_folder_id(service)
     file_id = _find_db_file_id(service, folder_id)
     if not file_id:
         raise DriveSyncError("In Google Drive wurde keine Sicherung gefunden.")
 
+    tmp_path = db.DB_FILE.with_name(db.DB_FILE.name + ".download")
     request = service.files().get_media(fileId=file_id)
-    with open(DB_FILE, "wb") as fh:
-        downloader = MediaIoBaseDownload(fh, request)
-        done = False
-        while not done:
-            _, done = downloader.next_chunk()
+    try:
+        with open(tmp_path, "wb") as fh:
+            downloader = MediaIoBaseDownload(fh, request)
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+        try:
+            return db.replace_database_file(tmp_path, reason="vor-download")
+        except ValueError as exc:
+            raise DriveSyncError(f"Die Sicherung aus Google Drive ist unbrauchbar: {exc}") from exc
+    finally:
+        try:
+            tmp_path.unlink(missing_ok=True)  # nach erfolgreichem Austausch existiert sie nicht mehr
+        except OSError:
+            pass

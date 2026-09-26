@@ -6,13 +6,25 @@ Die GUI arbeitet mit einem Puffer im Speicher (Liste von Dicts); die
 Datenbank wird nur beim Start gelesen (load_all) und beim aktiven Speichern
 komplett neu geschrieben (replace_all). Es gibt bewusst keine Funktionen,
 die einzelne Zeilen sofort in die Datenbank schreiben.
+
+Bevor die Datenbankdatei überschrieben wird (Speichern, Google-Drive-
+Download), legt der Aufrufer mit create_backup() eine Sicherung im Ordner
+BACKUP/ neben der Datenbank an; es bleiben nur die neuesten
+`db_backup_keep` Sicherungen liegen (config.json, Standard 20).
 """
 
+import os
 import sqlite3
+from contextlib import closing
+from datetime import datetime
+from typing import Optional
 
+import config
 from paths import base_dir
 
 DB_FILE = base_dir() / "manga_library.db"
+BACKUP_DIR_NAME = "BACKUP"
+BACKUP_PREFIX = "manga_library_"
 
 # Schema-Versionierung über SQLites eingebautes PRAGMA user_version (ein
 # einzelner Integer, direkt im Datenbank-Header gespeichert - kein
@@ -153,9 +165,8 @@ def load_all():
     """Lädt den gesamten aktuell gespeicherten Bestand als Liste von Dicts
     (inkl. 'id'). Wird beim Programmstart und nach Google-Drive-Downloads
     aufgerufen, um den Speicher-Puffer zu befüllen."""
-    conn = get_connection()
-    rows = conn.execute("SELECT * FROM werke ORDER BY titel COLLATE NOCASE").fetchall()
-    conn.close()
+    with closing(get_connection()) as conn:
+        rows = conn.execute("SELECT * FROM werke ORDER BY titel COLLATE NOCASE").fetchall()
     return [dict(row) for row in rows]
 
 
@@ -165,18 +176,108 @@ def replace_all(entries):
     Datenbank (aktives Speichern). Der bisherige Inhalt wird ersetzt, alle
     Einträge bekommen dabei frische, fortlaufende IDs.
 
+    Löschen und Neu-Schreiben laufen in einer einzigen Transaktion: Schlägt
+    etwas fehl, wird alles zurückgerollt und die Ausnahme weitergereicht -
+    die Datenbank behält dann ihren bisherigen Inhalt.
+
     Gibt den frisch aus der Datenbank geladenen Bestand zurück (mit den
     neu vergebenen IDs), damit der Puffer synchron bleibt.
     """
-    conn = get_connection()
-    conn.execute("DELETE FROM werke")
     cols = ", ".join(STORED_COLUMN_NAMES)
     placeholders = ", ".join("?" for _ in STORED_COLUMN_NAMES)
-    for entry in entries:
-        conn.execute(
-            f"INSERT INTO werke ({cols}) VALUES ({placeholders})",
-            [entry.get(c, "") or "" for c in STORED_COLUMN_NAMES],
-        )
-    conn.commit()
-    conn.close()
+    rows = [[entry.get(c, "") or "" for c in STORED_COLUMN_NAMES] for entry in entries]
+    with closing(get_connection()) as conn:
+        with conn:  # commit bei Erfolg, rollback bei einer Ausnahme
+            conn.execute("DELETE FROM werke")
+            conn.executemany(f"INSERT INTO werke ({cols}) VALUES ({placeholders})", rows)
     return load_all()
+
+
+# ---------------------------------------------------------------------------
+# Sicherungen & Austausch der Datenbankdatei
+# ---------------------------------------------------------------------------
+
+def backup_dir():
+    """Ordner der Datenbank-Sicherungen (BACKUP/ neben der Datenbank)."""
+    return DB_FILE.parent / BACKUP_DIR_NAME
+
+
+def create_backup(reason: str, keep: int = None):
+    """
+    Legt eine Kopie der aktuellen Datenbankdatei als
+    BACKUP/manga_library_<Datum>_<Uhrzeit>_<reason>.db an und räumt danach
+    alte Sicherungen weg, sodass höchstens `keep` (Standard: config.json
+    "db_backup_keep") übrig bleiben.
+
+    Kopiert wird über die Backup-Funktion von SQLite (konsistente Kopie,
+    auch falls die Datei gerade geöffnet ist). Gibt den Pfad der Sicherung
+    zurück, oder None, wenn noch keine Datenbankdatei existiert. Löst
+    sqlite3.Error/OSError aus, wenn die Sicherung nicht angelegt werden kann.
+    """
+    if not DB_FILE.exists():
+        return None
+    if keep is None:
+        keep = config.get_int("db_backup_keep", 20)
+
+    folder = backup_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    now = datetime.now()
+    # Zeitstempel vorne im Namen: das Aufräumen sortiert nach dem Namen
+    path = folder / f"{BACKUP_PREFIX}{now:%Y-%m-%d_%H-%M-%S}-{now.microsecond // 1000:03d}_{reason}.db"
+    with closing(sqlite3.connect(DB_FILE)) as source, closing(sqlite3.connect(path)) as target:
+        source.backup(target)
+    _prune_backups(keep)
+    return path
+
+
+def _prune_backups(keep: int) -> None:
+    """Löscht die ältesten Sicherungen, sodass höchstens `keep` (mindestens
+    1) übrig bleiben. Fehler beim Löschen werden ignoriert - reines
+    Aufräumen, das den eigentlichen Vorgang nicht stören darf."""
+    keep = max(1, keep)
+    try:
+        files = sorted(backup_dir().glob(BACKUP_PREFIX + "*.db"), key=lambda p: p.name)
+    except OSError:
+        return
+    for path in files[:-keep]:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
+def validate_database_file(path) -> None:
+    """
+    Prüft, ob `path` eine intakte Bibliotheks-Datenbank ist (lesbare
+    SQLite-Datei, PRAGMA integrity_check = ok, Tabelle `werke` vorhanden).
+    Löst ValueError mit einer für den Nutzer gedachten Meldung aus.
+    """
+    unchanged = "Die lokale Datenbank bleibt unverändert."
+    try:
+        with closing(sqlite3.connect(path)) as conn:
+            check = conn.execute("PRAGMA integrity_check").fetchone()
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    except sqlite3.DatabaseError as exc:
+        raise ValueError(f"Die Datei ist keine gültige Datenbank ({exc}). {unchanged}") from exc
+    if not check or check[0] != "ok":
+        raise ValueError(f"Die Datenbank ist beschädigt ({check[0] if check else 'keine Antwort'}). {unchanged}")
+    if "werke" not in tables:
+        raise ValueError(f"Die Datei enthält keine Bibliotheks-Daten (Tabelle „werke“ fehlt). {unchanged}")
+
+
+def replace_database_file(new_file, reason: str) -> Optional[str]:
+    """
+    Ersetzt die lokale Datenbankdatei durch `new_file` (z.B. einen
+    Google-Drive-Download): prüft die neue Datei zuerst (siehe
+    validate_database_file), sichert dann die bisherige Datenbank (siehe
+    create_backup) und tauscht die Datei erst danach in einem Schritt aus
+    (os.replace). Scheitert ein Schritt, bleibt die lokale Datenbank
+    unverändert.
+
+    Gibt den Pfad der Sicherung zurück (oder None, wenn es noch keine
+    lokale Datenbank gab).
+    """
+    validate_database_file(new_file)
+    backup_path = create_backup(reason)
+    os.replace(new_file, DB_FILE)
+    return str(backup_path) if backup_path else None
