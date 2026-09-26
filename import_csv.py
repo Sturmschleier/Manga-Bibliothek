@@ -49,6 +49,11 @@ _HEADER_ALIASES["baende_bis"] |= {"bis", "bände", "baende (bis)", "baende"}
 # einer "falschen" Spaltenanzahl abzubrechen.
 _IGNORED_HEADER_ALIASES = {"rückstand", "ruckstand"}
 
+# "VÖ +4" / "VÖ +5" gibt es seit Schema-Version 2 nicht mehr. Ältere
+# CSV-Dateien (auch frühere eigene Exporte) enthalten sie aber noch - sie
+# werden beim Import ebenfalls ignoriert, statt die Datei abzulehnen.
+_REMOVED_HEADER_ALIASES = {"vö +4", "vö +5", "vö+4", "vö+5"}
+
 
 def _match_columns(header_row):
     """
@@ -100,17 +105,24 @@ def parse_csv(path: str):
         # Eine vorhandene "Rückstand"-Spalte komplett aus Kopfzeile UND allen
         # Datenzeilen entfernen, bevor die reguläre Validierung/Zuordnung
         # beginnt - unabhängig davon, an welcher Position sie steht.
-        ignored_indexes = [
-            i for i, raw in enumerate(header)
-            if (raw or "").strip().lower() in _IGNORED_HEADER_ALIASES
-        ]
-        if ignored_indexes:
-            header = [v for i, v in enumerate(header) if i not in ignored_indexes]
-            raw_rows = [[v for i, v in enumerate(row) if i not in ignored_indexes] for row in raw_rows]
-            warnings.append(
-                "Die Spalte „Rückstand“ wurde in der Datei gefunden und beim Import "
-                "ignoriert (sie wird nur live berechnet, nie gespeichert)."
-            )
+        def _drop_columns(aliases, message):
+            nonlocal header, raw_rows
+            indexes = [i for i, raw in enumerate(header) if (raw or "").strip().lower() in aliases]
+            if indexes:
+                header = [v for i, v in enumerate(header) if i not in indexes]
+                raw_rows = [[v for i, v in enumerate(row) if i not in indexes] for row in raw_rows]
+                warnings.append(message)
+
+        _drop_columns(
+            _IGNORED_HEADER_ALIASES,
+            "Die Spalte „Rückstand“ wurde in der Datei gefunden und beim Import "
+            "ignoriert (sie wird nur live berechnet, nie gespeichert).",
+        )
+        _drop_columns(
+            _REMOVED_HEADER_ALIASES,
+            "Die Spalten „VÖ +4“ / „VÖ +5“ wurden in der Datei gefunden und beim Import "
+            "ignoriert (sie existieren im Programm nicht mehr).",
+        )
 
         if len(header) != expected_count:
             raise ValueError(
@@ -125,7 +137,7 @@ def parse_csv(path: str):
                 "Die Kopfzeile konnte nicht eindeutig erkannt werden - Spalten wurden "
                 "anhand der Standard-Reihenfolge zugeordnet (Titel, Bände (bis), "
                 "Komplett, Beendet, Gelesen bis, Typ, Zugang, Verlag, Kommentar, "
-                "VÖ +1 … VÖ +5). Bitte das Ergebnis nach dem Import kurz prüfen."
+                "VÖ +1 … VÖ +3). Bitte das Ergebnis nach dem Import kurz prüfen."
             )
         elif mapping != CSV_FIELDS:
             warnings.append(

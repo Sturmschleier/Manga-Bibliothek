@@ -8,7 +8,7 @@ Bestellliste mit klickbaren Links).
 import html
 import re
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtWidgets import QApplication, QDialog, QHBoxLayout, QLabel, QPushButton, QTextBrowser, QVBoxLayout
 
 import config
@@ -40,6 +40,15 @@ class IsbnResultWindow(QDialog):
         super().__init__(parent)
         self.setWindowTitle(f"ISBN-Abgleich & Bestellliste – {label}")
         self.resize(860, 620)
+        # QDialog hat standardmäßig nur einen Schließen-Button - für die lange
+        # Bestellliste sind Maximieren/Minimieren und ein Größenziehpunkt
+        # aber sinnvoll. CustomizeWindowHint ist nötig, damit Windows die
+        # explizit gewählten Titelleisten-Buttons auch wirklich anzeigt.
+        self.setWindowFlags(
+            Qt.Dialog | Qt.CustomizeWindowHint | Qt.WindowTitleHint | Qt.WindowSystemMenuHint
+            | Qt.WindowMinMaxButtonsHint | Qt.WindowCloseButtonHint
+        )
+        self.setSizeGripEnabled(True)
         self.bestellliste_md = bestellliste_md or ""
         # Welche Fallback-Domain markiert eine "nicht gefunden"-Zeile, hängt
         # vom konfigurierten Anbieter ab (buchhandel.de oder manga-passion) -
@@ -86,12 +95,26 @@ class IsbnResultWindow(QDialog):
         btn_row = QHBoxLayout()
         self.copy_btn = QPushButton("Bestellliste in Zwischenablage kopieren")
         self.copy_btn.clicked.connect(self._copy)
+        self.maximize_btn = QPushButton("Maximieren")
+        self.maximize_btn.clicked.connect(self._toggle_maximized)
         close_btn = QPushButton("Schließen")
         close_btn.clicked.connect(self.accept)
         btn_row.addWidget(self.copy_btn)
         btn_row.addStretch(1)
+        btn_row.addWidget(self.maximize_btn)
         btn_row.addWidget(close_btn)
         layout.addLayout(btn_row)
+
+    def _toggle_maximized(self):
+        if self.isMaximized():
+            self.showNormal()
+        else:
+            self.showMaximized()
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.WindowStateChange and hasattr(self, "maximize_btn"):
+            self.maximize_btn.setText("Wiederherstellen" if self.isMaximized() else "Maximieren")
 
     @staticmethod
     def _monospace_font():

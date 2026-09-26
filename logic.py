@@ -11,6 +11,9 @@ from typing import Optional, Union
 # Konstante statt eines an mehreren Stellen wiederholten "Magic String".
 EXCEEDS = "exceeds"
 
+# Die VÖ-Spalten, die beim "+1" nach vorn rücken (Reihenfolge = Zeitplan).
+VOE_KEYS = ("voe_1", "voe_2", "voe_3")
+
 
 def increment_baende(entry: dict) -> Optional[int]:
     """
@@ -22,7 +25,7 @@ def increment_baende(entry: dict) -> Optional[int]:
     Ausnahme: Steht in VÖ+1 der Text "Fortlaufend" (die Reihe erscheint
     ohne festen, bandweise weiterrückenden Zeitplan), wird NICHTS
     verschoben - VÖ+1 bleibt unverändert auf "Fortlaufend" stehen, auch
-    VÖ+2 … VÖ+5 bleiben unangetastet.
+    VÖ+2 und VÖ+3 bleiben unangetastet.
 
     Verändert `entry` in place. Gibt den neuen Bände-Wert zurück, oder
     None, falls "Bände (bis)" keine gültige Zahl enthält (entry bleibt in
@@ -36,11 +39,11 @@ def increment_baende(entry: dict) -> Optional[int]:
     entry["baende_bis"] = str(new_baende)
 
     if (entry.get("voe_1") or "").strip().lower() != "fortlaufend":
-        voe_values = [entry.get(f"voe_{i}") or "" for i in range(1, 6)]
+        voe_values = [entry.get(f"voe_{i}") or "" for i in range(1, len(VOE_KEYS) + 1)]
         shifted = voe_values[1:] + [""]
         if not any(v.strip() for v in shifted):
             shifted[0] = "NA"
-        for i in range(5):
+        for i in range(len(VOE_KEYS)):
             entry[f"voe_{i + 1}"] = shifted[i]
 
     # Altlasten-Kompatibilität: frühere Programmversionen legten eine

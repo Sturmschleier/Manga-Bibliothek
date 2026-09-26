@@ -48,12 +48,12 @@ Eine Legende dazu steht direkt unter der Werkzeugleiste im Programm.
 ## „+1“-Buttons
 
 - **Bände (bis):** erhöht die Zahl um 1 und verschiebt gleichzeitig die
-  VÖ-Termine eine Position nach vorn (VÖ+2 → VÖ+1, VÖ+3 → VÖ+2, usw., da
+  VÖ-Termine eine Position nach vorn (VÖ+2 → VÖ+1, VÖ+3 → VÖ+2, da
   der bisherige VÖ+1-Termin durch den neuen Band eingelöst wurde). Sind
   danach keine Termine mehr vorhanden, wird „NA“ (pink) in VÖ+1
   eingetragen. **Ausnahme:** Steht in VÖ+1 der Text „Fortlaufend“ (Reihe
   ohne festen, bandweise weiterrückenden Zeitplan), wird nichts
-  verschoben – VÖ+1 bleibt auf „Fortlaufend“ stehen, VÖ+2 … VÖ+5 bleiben
+  verschoben – VÖ+1 bleibt auf „Fortlaufend“ stehen, VÖ+2 und VÖ+3 bleiben
   unangetastet.
 - **Gelesen bis:** erhöht nur dieses eine Feld um 1. Lässt sich nicht über
   „Bände (bis)“ hinaus erhöhen – man kann nicht mehr Bände gelesen haben,
@@ -188,10 +188,17 @@ jeweilige Funktion zeigt dann nur eine Fehlermeldung.)
 Beim ersten Start wird automatisch eine leere Datenbank
 `manga_library.db` im Programmordner angelegt.
 
+**Schema-Änderung „VÖ +4 / VÖ +5 entfernt“:** Es gibt nur noch die Spalten
+VÖ +1 … VÖ +3. Eine bestehende Datenbank wird beim nächsten Start
+automatisch migriert (Spalten `voe_4`/`voe_5` werden gelöscht). Vorher
+legt das Programm einmalig eine Sicherung `manga_library.db.vor-schema-v2.bak`
+neben der Datenbank an, falls diese Spalten noch existieren. Ein
+Google-Drive-Download einer älteren Sicherung wird ebenfalls migriert.
+
 ## Bestehende Liste importieren
 
-Deine mitgelieferte Datei `Manga - Besitz.csv` liegt bereits in diesem
-Ordner.
+Deine persönliche Liste `Manga - Besitz.csv` liegt lokal in diesem Ordner,
+ist aber per `.gitignore` vom Repository ausgeschlossen (nicht auf GitHub).
 
 - **In der Oberfläche:** Menü **Datei → CSV importieren …** → Datei auswählen. Die
   Einträge landen im Zwischenspeicher – **danach auf „💾 Speichern“
@@ -213,7 +220,10 @@ der Standard-Reihenfolge versucht – mit einem Hinweis, das Ergebnis kurz
 zu prüfen. Eine „Rückstand“-Spalte in der Datei (egal an welcher
 Position) wird erkannt und komplett ignoriert, statt den Import deswegen
 abzulehnen – sie ist eine reine Anzeige-/Berechnungsspalte und nie Teil
-des gespeicherten Datenmodells.
+des gespeicherten Datenmodells. Ebenso werden „VÖ +4“ und „VÖ +5“ ignoriert
+(diese Spalten gibt es nicht mehr, siehe unten) – ältere CSV-Dateien mit
+14 Spalten, auch die ursprüngliche `Manga - Besitz.csv`, lassen sich also
+weiterhin importieren; die Inhalte dieser beiden Spalten werden verworfen.
 
 ## Bestand als CSV exportieren
 
@@ -234,6 +244,11 @@ nie gespeichert) sind enthalten.
 - **Menü „Konfigurieren“** – Farben (Untermenü), Konfiguration sowie die
   Schalter „Nach Bearbeitung zur Zeile springen“ und „Gestoppt: keine
   Berechnung“
+- **Bei buchhandel.de suchen** (Datei-Menü, Strg+B oder Rechtsklick auf eine
+  Tabellenzeile) – öffnet im Browser die buchhandel.de-Suche für den
+  markierten Titel (gedruckte Bücher ab dem aktuellen Erscheinungsjahr,
+  nach Erscheinungsdatum sortiert). Unabhängig vom Fallback-Anbieter des
+  ISBN-Abgleichs (Standard dort ebenfalls buchhandel.de).
 - **Doppelklick auf eine Zeile** (oder Datei → Bearbeiten) – öffnet das Formular
 - **Suche** – oberstes Element der rechten Seitenleiste, filtert live über
   alle Spalten
@@ -296,7 +311,7 @@ Fensterbreite, per Ziehen am Trenner frei verstellbar):
   über der Liste. Absteigend nach Gesamt sortiert. Respektiert „Gestoppt:
   keine Berechnung“ (siehe unten), falls aktiv.
 - **Erscheinungstermine** – Anzahl der Termine (Treffer über alle
-  VÖ-Spalten VÖ +1 … VÖ +5, nicht nur VÖ +1 – ein Titel mit zwei Terminen
+  VÖ-Spalten VÖ +1 … VÖ +3, nicht nur VÖ +1 – ein Titel mit zwei Terminen
   im selben Zeitraum zählt also zweimal) im aktuellen, im nächsten und im
   übernächsten Kalendermonat, als drei Zähler im selben Stil wie die
   Statistik oben.
@@ -429,7 +444,7 @@ mangalib/
 ├── build.bat            PyInstaller-Buildskript (Windows) für die exe
 ├── requirements.txt    Python-Laufzeit-Abhängigkeiten
 ├── requirements-dev.txt Zusätzlich für Tests: pytest
-└── Manga - Besitz.csv  Deine ursprüngliche Liste (zum Import)
+└── Manga - Besitz.csv  Deine ursprüngliche Liste (nur lokal, nicht im Repo)
 ```
 
 ## Automatisierte Tests

@@ -178,7 +178,7 @@ class IsbnLookupDialog(QDialog):
         fallback_lbl = QLabel(f"<b>{config.get('isbn_fallback_provider', 'buchhandel.de')}</b>")
         shop_row.addWidget(fallback_lbl)
         shop_row.addStretch(1)
-        shop_hint = QLabel("(änderbar über „⚙ Konfiguration“)")
+        shop_hint = QLabel("(änderbar über „Konfigurieren → Konfiguration …“)")
         shop_hint.setStyleSheet("color: #666;")
         shop_row.addWidget(shop_hint)
         layout.addLayout(shop_row)
