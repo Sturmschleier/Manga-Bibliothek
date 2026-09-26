@@ -23,6 +23,9 @@ DEFAULTS = {
     # ISBN-Abgleich: Online-Buchhändler, zu dem eine gefundene ISBN verlinkt wird
     "isbn_shop_name": "Konold",
     "isbn_shop_url_template": "https://konold.buchhandlung.de/shop/action/productDetails?id={isbn}",
+    # Gewählter Anbieter für die Bestellliste (Dropdown im ISBN-Dialog, siehe shops.py):
+    # "" = Standard-Buchhändler (isbn_shop_name), sonst z.B. "Thalia"
+    "isbn_shop_active": "",
     # Fallback-Suche, wenn keine ISBN automatisch gefunden wurde:
     # "buchhandel.de" (Standard) oder "manga-passion"
     "isbn_fallback_provider": "buchhandel.de",

@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 
 import config
 import database as db
+import shops
 
 from .constants import JA_NEIN_OPTIONEN, TYP_OPTIONEN
 
@@ -170,9 +171,12 @@ class IsbnLookupDialog(QDialog):
         layout.addWidget(info)
 
         shop_row = QHBoxLayout()
-        shop_row.addWidget(QLabel("Verlinkter Buchhändler (Fund):"))
-        shop_name_lbl = QLabel(f"<b>{config.get('isbn_shop_name', 'Konold')}</b>")
-        shop_row.addWidget(shop_name_lbl)
+        shop_row.addWidget(QLabel("Bestellen bei:"))
+        self.shop_box = QComboBox()
+        self.shop_box.addItems(list(shops.available()))
+        self.shop_box.setCurrentText(shops.active_name())
+        self.shop_box.setToolTip("Buchhändler, zu dem die gefundenen ISBNs in der Bestellliste verlinkt werden")
+        shop_row.addWidget(self.shop_box)
         shop_row.addSpacing(16)
         shop_row.addWidget(QLabel("Fallback-Suche:"))
         fallback_lbl = QLabel(f"<b>{config.get('isbn_fallback_provider', 'buchhandel.de')}</b>")
@@ -235,6 +239,7 @@ class IsbnLookupDialog(QDialog):
         self.year_input.setEnabled(enabled)
 
     def _submit(self):
+        shops.set_active(self.shop_box.currentText())  # Auswahl dauerhaft merken (auch für die Bestellliste)
         overwrite = self.overwrite_checkbox.isChecked()
         if self.month_radio.isChecked():
             self.on_submit(("month", self.month_input.value(), self.year_input.value(), overwrite))
