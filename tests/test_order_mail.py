@@ -4,6 +4,8 @@ Tests für order_mail.py: Bestell-E-Mail auslesen und Artikel den Einträgen
 zuordnen. Die Test-Mail wird synthetisch erzeugt (keine echten Bestelldaten).
 """
 
+import pytest
+
 import order_mail
 
 _ROW = (
@@ -171,3 +173,38 @@ def test_build_log_lists_none_when_everything_matched():
     matches, owned, unmatched = order_mail.match_items(items, entries)
     text = "\n".join(order_mail.build_log("Datei", 1, items, matches, matches, owned, unmatched))
     assert "--- ARTIKEL OHNE PASSENDEN EINTRAG (0) ---\n  (keine)" in text
+
+
+# --------------------------------------------- Markierung mit Bandnummer (Feld-Wert)
+
+def test_match_keeps_highest_band_per_title_and_kind():
+    entries = [_entry("Sanda", 11)]
+    items = [order_mail.OrderItem("Sanda - Band 12"), order_mail.OrderItem("Sanda - Band 13")]
+    matches, _, _ = order_mail.match_items(items, entries)
+    assert [(m.entry["titel"], m.band) for m in matches] == [("Sanda", 13)]
+
+
+def _match(entry, band, kind=order_mail.KIND_ORDER):
+    return order_mail.Match(order_mail.OrderItem(f"{entry['titel']} {band}", kind=kind), entry, band)
+
+
+def test_new_marks_only_for_unmarked_or_higher_band():
+    unmarked = {"titel": "A", "baende_bis": "11"}
+    lower = {"titel": "B", "baende_bis": "11", "bestellt": "12"}
+    same = {"titel": "C", "baende_bis": "11", "bestellt": "13"}
+    higher = {"titel": "D", "baende_bis": "11", "bestellt": "14"}
+    pickup = {"titel": "E", "baende_bis": "11", "bestellt": "13"}   # bestellt gesetzt, angekommen noch nicht
+    matches = [
+        _match(unmarked, 13), _match(lower, 13), _match(same, 13), _match(higher, 13),
+        _match(pickup, 13, order_mail.KIND_PICKUP),
+    ]
+    assert [m.entry["titel"] for m in order_mail.new_marks(matches)] == ["A", "B", "E"]
+
+
+def test_parse_message_with_unknown_charset_raises_value_error():
+    raw = (
+        b"From: shop@example.org\nSubject: Bestellung\nMIME-Version: 1.0\n"
+        b'Content-Type: text/html; charset="x-gibt-es-nicht"\n\n<html><body>kaputt</body></html>'
+    )
+    with pytest.raises(ValueError, match="nicht gelesen werden"):
+        order_mail.parse_message_bytes(raw)

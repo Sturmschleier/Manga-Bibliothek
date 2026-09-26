@@ -12,10 +12,13 @@ Passt die Spaltenanzahl nicht oder lässt sich die Kopfzeile gar nicht
 zuordnen, wird das klar gemeldet statt stillschweigend falsche/verschobene
 Daten zu erzeugen.
 
+Trennzeichen (Komma, Semikolon oder Tab) und Zeichensatz (UTF-8, sonst
+Windows-1252 wie bei älteren Excel-Exporten) werden automatisch erkannt.
+
 Schreibt bewusst NICHT in die Datenbank – das Einfügen in den
 Speicher-Puffer und das spätere aktive Speichern übernimmt die GUI
-(gui.py), damit importierte Daten wie jede andere Änderung erst durch
-einen expliziten Speichern-Klick dauerhaft werden.
+(library.LibraryBuffer.import_entries), damit importierte Daten wie jede
+andere Änderung erst durch einen expliziten Speichern-Klick dauerhaft werden.
 
 Als eigenständiges Skript aufrufbar für einen direkten Import ohne GUI:
     python import_csv.py "Manga - Besitz.csv"
@@ -24,6 +27,7 @@ Sitzung existiert).
 """
 
 import csv
+import io
 import sys
 from pathlib import Path
 
@@ -42,7 +46,7 @@ _HEADER_ALIASES = {col: {db.LABELS[col].strip().lower()} for col in db.COLUMN_NA
 _HEADER_ALIASES["titel"] |= {"", "titel"}
 _HEADER_ALIASES["baende_bis"] |= {"bis", "bände", "baende (bis)", "baende"}
 
-# "Rückstand" ist eine reine Anzeige-/Berechnungsspalte (siehe gui.py) -
+# "Rückstand" ist eine reine Anzeige-/Berechnungsspalte (siehe gui/constants.py) -
 # nie Teil des gespeicherten Datenmodells. Taucht sie trotzdem in einer zu
 # importierenden CSV-Datei auf (z.B. weil ein eigener Export wieder
 # importiert wird), wird sie komplett ignoriert statt den Import wegen
@@ -80,6 +84,25 @@ def _match_columns(header_row):
     return mapping
 
 
+def _read_text(path: str) -> str:
+    """Dateiinhalt als Text: UTF-8 (mit oder ohne BOM), sonst Windows-1252
+    - so speichern ältere Excel-Versionen CSV-Dateien."""
+    raw = Path(path).read_bytes()
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return raw.decode("cp1252", errors="replace")
+
+
+def _detect_delimiter(text: str) -> str:
+    """Trennzeichen anhand der Kopfzeile: das häufigste von ";", "," und
+    Tab (eigene Exporte nutzen ";", die ursprüngliche Liste ",")."""
+    header = text.splitlines()[0] if text else ""
+    counts = {d: header.count(d) for d in (";", ",", "\t")}
+    best = max(counts, key=counts.get)
+    return best if counts[best] else ","
+
+
 def parse_csv(path: str):
     """
     Liest die CSV-Datei ein und gibt (entries, warnings) zurück:
@@ -95,8 +118,9 @@ def parse_csv(path: str):
     warnings = []
     expected_count = len(CSV_FIELDS)
 
-    with open(path, newline="", encoding="utf-8-sig") as f:
-        reader = csv.reader(f)
+    text = _read_text(path)
+    with io.StringIO(text, newline="") as f:
+        reader = csv.reader(f, delimiter=_detect_delimiter(text))
         header = next(reader, None)
         if header is None:
             raise ValueError("Die CSV-Datei ist leer.")

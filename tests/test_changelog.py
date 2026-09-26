@@ -118,3 +118,11 @@ def test_log_error_appends_traceback_with_timestamp(log_env):
 def test_log_error_returns_none_if_not_writable(log_env, monkeypatch):
     monkeypatch.setattr(changelog, "ERROR_LOG_FILE", log_env)  # ein Ordner lässt sich nicht als Datei öffnen
     assert changelog.log_error("x") is None
+
+
+def test_write_isbn_log_names_files_uniquely_and_keeps_configured_number(log_env):
+    config.set_value("isbn_log_keep", 2)
+    paths = [changelog.write_isbn_log([f"Abgleich {i}"]) for i in range(4)]
+    files = sorted(p.name for p in log_env.glob("isbn_abgleich_*.log"))
+    assert len(set(paths)) == 4 and len(files) == 2
+    assert (log_env / files[-1]).read_text(encoding="utf-8").strip() == "Abgleich 3"

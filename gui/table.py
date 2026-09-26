@@ -20,6 +20,18 @@ from .constants import (
     ROW_ID_ROLE, RUCKSTAND_COLUMN, _ruckstand_value,
 )
 
+
+def _order_mark_tooltip(entry):
+    """Tooltip der Titelzelle: für welchen Band die Bestellt-/Angekommen-
+    Markierung gilt (Felder enthalten die Bandnummer), sonst None."""
+    lines = []
+    for field_name, label in (("bestellt", "bestellt"), ("angekommen", "abholbereit")):
+        value = (entry.get(field_name) or "").strip()
+        if value:
+            lines.append(f"Band {value} {label}" if value.isdigit() else label.capitalize())
+    return "\n".join(lines) or None
+
+
 class MangaTableModel(QAbstractTableModel):
     """Zeigt eine (bereits gefilterte/sortierte) Liste von Puffer-Einträgen
     an. Hält keine eigene Kopie der Daten - `rows` referenziert dieselben
@@ -85,6 +97,8 @@ class MangaTableModel(QAbstractTableModel):
             if col == "titel" and entry.get("angekommen") and self.colors_enabled.get("angekommen", True):
                 return QColor(colors.ANGEKOMMEN_COLOR)
             return None
+        if role == Qt.ToolTipRole and col == "titel":
+            return _order_mark_tooltip(entry)
         if role == ROW_ID_ROLE:
             return entry.get("id")
         return None

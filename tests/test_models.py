@@ -50,11 +50,16 @@ def test_werk_from_dict_ignores_unknown_keys():
 
 
 def test_werk_to_dict_round_trip():
-    original = {c: "" for c in db.COLUMN_NAMES}
+    original = {c: "" for c in db.STORED_COLUMN_NAMES}
     original.update({"id": 42, "titel": "Testreihe", "verlag": "Carlsen Manga"})
     werk = Werk.from_dict(original)
     result = werk.to_dict()
     assert result == original
+
+
+def test_werk_keeps_hidden_order_marks():
+    werk = Werk.from_dict({"titel": "Sanda", "bestellt": "14", "angekommen": "13"})
+    assert werk.to_dict()["bestellt"] == "14" and werk.to_dict()["angekommen"] == "13"
 
 
 def test_werk_works_as_drop_in_for_logic_functions():

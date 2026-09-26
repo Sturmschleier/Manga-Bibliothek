@@ -1,24 +1,18 @@
 """
 gui/isbn_view.py
-Ergebnisdarstellung des ISBN-Abgleichs: IsbnWorkerSignals (Qt-Signal für
-den Hintergrund-Thread) und IsbnResultWindow (Zusammenfassung + fertige
-Bestellliste mit klickbaren Links).
+Ergebnisdarstellung des ISBN-Abgleichs: IsbnResultWindow (Zusammenfassung
++ fertige Bestellliste mit klickbaren Links). Der Abgleich selbst läuft über
+gui/worker.AsyncCall im Hintergrund.
 """
 
 import html
 import re
 
-from PySide6.QtCore import QEvent, QObject, Qt, Signal
+from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication, QDialog, QHBoxLayout, QLabel, QPushButton, QTextBrowser, QVBoxLayout
 
 import config
-
-class IsbnWorkerSignals(QObject):
-    """Eigenes QObject für das Signal, da der eigentliche Abgleich in
-    einem Hintergrund-Thread läuft (threading.Thread) - Qt liefert
-    Signal-Emissionen aus einem anderen Thread automatisch sicher
-    ("queued") an den Haupt-Thread aus."""
-    finished = Signal(object, object, object)  # report, bestellliste, error
 
 
 class IsbnResultWindow(QDialog):
@@ -35,6 +29,7 @@ class IsbnResultWindow(QDialog):
     # bleiben.
     _LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://\S+?)\)(?=\s|$|\|)|(https?://\S+)")
     _FALLBACK_BG = "#FBD3D3"
+    _SONDERAUSGABE_BG = "#FFE08A"   # golden: normale Ausgabe UND Sonderausgabe vorhanden
 
     def __init__(self, parent, label, report, bestellliste_md):
         super().__init__(parent)
@@ -56,12 +51,14 @@ class IsbnResultWindow(QDialog):
         # sobald der Standard-Anbieter geändert wird.
         provider = config.get("isbn_fallback_provider", "buchhandel.de")
         self._fallback_marker = "manga-passion.de" if provider == "manga-passion" else "buchhandel.de"
+        # Das Fenster erscheint nur nach einem Abgleich - isbn_lookup (und
+        # damit "requests") ist dann bereits erfolgreich geladen.
+        from isbn_lookup import SONDERAUSGABE_MARKER
+        self._special_marker = SONDERAUSGABE_MARKER
 
         # Fenster bewusst fest auf ein helles Thema setzen, unabhängig vom
-        # Systemthema (z.B. Windows-Dunkelmodus): sonst kann der dunkle
-        # Text auf einem dann ebenfalls dunklen Standard-Hintergrund kaum
-        # noch lesbar sein - das war genau das Problem mit den zuvor nur
-        # für die Fallback-Zeilen fest vorgegebenen Farben.
+        # Systemthema (z.B. Windows-Dunkelmodus): die farbig hinterlegten
+        # Zeilen sind nur mit dunklem Text auf hellem Grund gut lesbar.
         self.setStyleSheet(
             "QDialog { background-color: #ffffff; }"
             "QLabel { color: #1a1a1a; }"
@@ -75,11 +72,16 @@ class IsbnResultWindow(QDialog):
         layout = QVBoxLayout(self)
 
         legend = QHBoxLayout()
-        swatch = QLabel()
-        swatch.setFixedSize(14, 14)
-        swatch.setStyleSheet(f"background-color: {self._FALLBACK_BG}; border: 1px solid #888;")
-        legend.addWidget(swatch)
-        legend.addWidget(QLabel("= keine ISBN automatisch gefunden (manueller Fallback-Link)"))
+        for color, text in (
+            (self._FALLBACK_BG, "= keine ISBN automatisch gefunden (manueller Fallback-Link)"),
+            (self._SONDERAUSGABE_BG, f"{self._special_marker} = normale Ausgabe und Sonderausgabe vorhanden"),
+        ):
+            swatch = QLabel()
+            swatch.setFixedSize(14, 14)
+            swatch.setStyleSheet(f"background-color: {color}; border: 1px solid #888;")
+            legend.addWidget(swatch)
+            legend.addWidget(QLabel(text))
+            legend.addSpacing(16)
         legend.addStretch(1)
         layout.addLayout(legend)
 
@@ -118,7 +120,6 @@ class IsbnResultWindow(QDialog):
 
     @staticmethod
     def _monospace_font():
-        from PySide6.QtGui import QFont
         font = QFont("Consolas")
         font.setStyleHint(QFont.Monospace)
         font.setPointSize(10)
@@ -128,7 +129,9 @@ class IsbnResultWindow(QDialog):
         """Wandelt den einfachen Text (mit Markdown-Links/nackten URLs) in
         HTML um: echte <a>-Links, Zeilen mit dem Fallback-Link des
         konfigurierten Anbieters (buchhandel.de oder manga-passion, siehe
-        self._fallback_marker) werden zusätzlich farblich hervorgehoben.
+        self._fallback_marker) werden zusätzlich farblich hervorgehoben,
+        Zeilen mit dem Sonderausgaben-Zeichen (normale Ausgabe und
+        Sonderausgabe vorhanden) golden.
 
         Text- und Linkfarbe werden hier bewusst fest vorgegeben (statt die
         Systemfarbe zu übernehmen) - sonst kann z.B. bei einem hellen
@@ -140,6 +143,7 @@ class IsbnResultWindow(QDialog):
         out_lines = []
         for line in content.split("\n"):
             is_fallback = self._fallback_marker in line
+            is_special = self._special_marker in line
 
             pos = 0
             pieces = []
@@ -162,16 +166,16 @@ class IsbnResultWindow(QDialog):
             style = f"white-space: pre-wrap; margin: 0; color:{TEXT_COLOR};"
             if is_fallback:
                 style += f" background-color:{self._FALLBACK_BG};"
+            elif is_special:
+                style += f" background-color:{self._SONDERAUSGABE_BG};"
             out_lines.append(f'<div style="{style}">{line_html}</div>')
 
         return "".join(out_lines)
 
     def _copy(self):
-        from PySide6.QtCore import QTimer
         QApplication.clipboard().setText(self.bestellliste_md)
 
-        # Sichtbare, kurze Rückmeldung, dass das Kopieren tatsächlich
-        # funktioniert hat (vorher passierte das ohne jede Reaktion).
+        # Kurze sichtbare Rückmeldung, dass das Kopieren funktioniert hat
         original_text = self.copy_btn.text()
         self.copy_btn.setText("✓ In Zwischenablage kopiert!")
         self.copy_btn.setEnabled(False)

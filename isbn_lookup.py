@@ -24,20 +24,21 @@ from __future__ import annotations
 
 import re
 import sqlite3
+import threading
 import time
 import urllib.parse
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import Callable, Optional
 
 import requests
 
-from paths import base_dir
 import changelog
 import config
 import shops
 import sorting
+from logic import parse_int
 
 DNB_SRU_ENDPOINT = "https://services.dnb.de/sru/dnb"
 REQUEST_DELAY_SECONDS = 1.5  # freundlich zur DNB-API
@@ -51,12 +52,9 @@ def ensure_isbn_cache_table(db_path: str) -> None:
     """
     Legt die Tabelle `isbn_cache` an, falls sie noch nicht existiert.
 
-    Ersetzt die frühere Lösung (eine transiente `isbn`-Spalte direkt in
-    `werke`, die bei jedem "Speichern" verworfen wurde, weil sie nicht
-    Teil des regulären Spaltenmodells war): Eine gefundene ISBN gilt
-    ohnehin nur für einen bestimmten Band-Stand (baende_bis zum Zeitpunkt
-    der Suche) - genau das bildet der Primärschlüssel (titel, baende_bis)
-    ab. Ändert sich baende_bis (z.B. durch den "+1"-Button), "verschwindet"
+    Eine gefundene ISBN gilt nur für einen bestimmten Band-Stand
+    (baende_bis zum Zeitpunkt der Suche) - genau das bildet der
+    Primärschlüssel (titel, baende_bis) ab. Ändert sich baende_bis (z.B. durch den "+1"-Button), "verschwindet"
     der Cache-Treffer für diesen Titel automatisch aus der Bestellliste,
     ohne dass er aktiv gelöscht werden müsste. Die ISBN übersteht dadurch
     ein normales "Speichern", ohne dass veraltete ISBNs stillschweigend
@@ -69,6 +67,11 @@ def ensure_isbn_cache_table(db_path: str) -> None:
     hinweg stabil, der Titel dagegen schon (solange er nicht umbenannt
     wird - eine Umbenennung macht eine alte, an den vorherigen Titel
     gebundene ISBN ohnehin zurecht ungültig).
+
+    `isbn_cache` enthält immer die NORMALE Ausgabe des Bandes. Gefundene
+    Sonderausgaben (Collector's Edition, Sammelschuber ...) stehen mit
+    demselben Schlüssel getrennt in `isbn_sonderausgaben` - auch dann, wenn
+    es (noch) keine normale Ausgabe gibt.
     """
     conn = sqlite3.connect(db_path)
     try:
@@ -83,30 +86,63 @@ def ensure_isbn_cache_table(db_path: str) -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS isbn_sonderausgaben (
+                titel TEXT NOT NULL,
+                baende_bis TEXT NOT NULL,
+                isbn TEXT NOT NULL,
+                bezeichnung TEXT,
+                gefunden_am TEXT,
+                PRIMARY KEY (titel, baende_bis, isbn)
+            )
+            """
+        )
         conn.commit()
     finally:
         conn.close()
 
 
+_ENTRY_KEYS = ("id", "titel", "verlag", "typ", "baende_bis", "voe_1")
+
+
+def _entries_with_cache(conn, entries=None) -> list[dict]:
+    """
+    Die zu prüfenden Einträge, jeweils ergänzt um "cached_isbn" (normale
+    Ausgabe aus isbn_cache, sonst None).
+
+    `entries` sind die Einträge des Zwischenspeichers der Oberfläche - so
+    arbeitet der Abgleich mit dem aktuellen Stand, auch wenn noch nicht
+    gespeichert wurde. Ohne `entries` (Kommandozeile) wird die Tabelle
+    `werke` der Datenbank gelesen.
+    """
+    if entries is None:
+        entries = [dict(zip(_ENTRY_KEYS, row)) for row in conn.execute(f"SELECT {', '.join(_ENTRY_KEYS)} FROM werke")]
+    cache = {(t, b): i for t, b, i in conn.execute("SELECT titel, baende_bis, isbn FROM isbn_cache")}
+    rows = []
+    for e in entries:
+        row = {key: e.get(key) for key in _ENTRY_KEYS}
+        row["titel"] = row["titel"] or ""
+        row["baende_bis"] = row["baende_bis"] or ""
+        row["cached_isbn"] = cache.get((row["titel"], row["baende_bis"]))
+        rows.append(row)
+    return rows
+
+
 def _naechster_band(baende_bis) -> Optional[int]:
-    """Ermittelt den nächsten (noch fehlenden) Band aus 'Bände (bis)'."""
-    if baende_bis is None:
-        return None
-    try:
-        return int(baende_bis) + 1
-    except (TypeError, ValueError):
-        m = re.search(r"\d+", str(baende_bis))
-        return int(m.group()) + 1 if m else None
+    """Ermittelt den nächsten (noch fehlenden) Band aus 'Bände (bis)' -
+    notfalls aus der ersten Zahl im Text (z.B. "12 + Artbook")."""
+    owned = parse_int(baende_bis)
+    if owned is None:
+        m = re.search(r"\d+", str(baende_bis or ""))
+        owned = int(m.group()) if m else None
+    return owned + 1 if owned is not None else None
 
 
 def _parse_voe_month(voe1: Optional[str]) -> Optional[tuple[int, int]]:
     """
-    Liefert (monat, jahr) aus einer VÖ+1-Zeichenkette oder None.
-    Nutzt dieselbe Datumserkennung wie sorting.py (TT.MM.JJJJ ODER
-    MM.JJJJ) - vorher wurde hier nur TT.MM.JJJJ verstanden, wodurch ein
-    VÖ+1-Wert wie "09.2026" beim Monats-/Jahr-Filter des ISBN-Abgleichs
-    übersehen worden wäre, obwohl Tabellensortierung und der Filter
-    "Mit Datum" ihn längst korrekt als Datum erkennen.
+    Liefert (monat, jahr) aus einer VÖ+1-Zeichenkette oder None - mit
+    derselben Datumserkennung wie sorting.py (TT.MM.JJJJ oder MM.JJJJ).
     """
     parsed = sorting.parse_date(voe1)
     if parsed is None:
@@ -125,22 +161,6 @@ def _matches_selection(
     if only_month:
         return _parse_voe_month(voe1) == only_month
     return True
-
-
-# ---------------------------------------------------------------------------
-# Log-Datei
-# ---------------------------------------------------------------------------
-
-def _write_log_file(lines: list[str]) -> str:
-    """Schreibt die gesammelten Log-Zeilen als eine Datei in LOG/ (unterhalb
-    des Programmordners bzw. neben der .exe) und gibt den Pfad zurück."""
-    log_dir = base_dir() / "LOG"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    filename = "isbn_abgleich_" + datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + ".log"
-    log_path = log_dir / filename
-    log_path.write_text("\n".join(lines), encoding="utf-8")
-    changelog.prune_isbn_logs()  # nur die neuesten "isbn_log_keep" Logdateien behalten
-    return str(log_path)
 
 
 # ---------------------------------------------------------------------------
@@ -167,14 +187,28 @@ def _subfield(datafield, code: str) -> Optional[str]:
     return None
 
 
+def _is_valid_isbn(isbn: str) -> bool:
+    """Prüft Länge und Prüfziffer einer ISBN ohne Bindestriche: ISBN-13
+    (beginnt mit 978/979, Gewichte 1/3, Summe durch 10 teilbar) oder
+    ISBN-10 (Gewichte 10..1, Prüfziffer X = 10, Summe durch 11 teilbar)."""
+    if len(isbn) == 13 and isbn.isdigit() and isbn[:3] in ("978", "979"):
+        return sum(int(d) * (3 if i % 2 else 1) for i, d in enumerate(isbn)) % 10 == 0
+    if len(isbn) == 10 and isbn[:9].isdigit() and (isbn[9].isdigit() or isbn[9] in "Xx"):
+        digits = [int(d) for d in isbn[:9]] + [10 if isbn[9] in "Xx" else int(isbn[9])]
+        return sum(d * (10 - i) for i, d in enumerate(digits)) % 11 == 0
+    return False
+
+
 def _clean_isbn(raw: str) -> Optional[str]:
-    """Extrahiert die reine ISBN aus Feld 020$a (das oft Zusatztext wie
-    '978-3-551-... : EUR 7.50 (Bd. 23)' enthält)."""
-    m = re.search(r"(97[89][\d\-]{10,17})", raw)
-    if m:
-        return re.sub(r"-", "", m.group(1))
-    m = re.search(r"([\dXx][\d\-]{8,12}[\dXx])", raw)
-    return re.sub(r"-", "", m.group(1)) if m else None
+    """Extrahiert die erste gültige ISBN aus Feld 020$a (das oft Zusatztext
+    wie '978-3-551-... : EUR 7.50 (Bd. 23)' enthält). Gültig heißt: richtige
+    Länge und Prüfziffer (siehe _is_valid_isbn) - eine verstümmelte Nummer
+    oder eine andere Zahl im Feld wird so nicht als ISBN übernommen."""
+    for candidate in re.findall(r"\d[\d\-]{8,15}[\dXx]", raw or ""):
+        isbn = candidate.replace("-", "").upper()
+        if _is_valid_isbn(isbn):
+            return isbn
+    return None
 
 
 def _year_constraint() -> str:
@@ -188,18 +222,35 @@ def _year_constraint() -> str:
     return f"(jhr={current_year} or jhr={current_year + 1})"
 
 
-def _band_variants(band: int) -> list[str]:
+def _cql_term(value: str) -> str:
     """
-    Liefert plausible Schreibweisen einer Bandnummer, da die DNB (und
-    Verlage) einstellige Bände uneinheitlich mit oder ohne führende Null
-    angeben - z.B. Band 7 als "7" oder als "07".
+    Setzt einen Suchbegriff für eine CQL-Anfrage in Anführungszeichen.
+
+    Zeichen mit Sonderbedeutung werden durch Leerzeichen ersetzt (die DNB
+    sucht ohnehin wortweise): Ein " oder \\ im Titel würde die Anfrage
+    sonst abbrechen, und * ? ^ wirken auch innerhalb der Anführungszeichen
+    als Platzhalter/Anker ("Kaiju No. 8?" liefert z.B. 0 statt 49 Treffer).
     """
-    variants = [str(band)]
-    if 0 <= band < 100:
-        padded = f"{band:02d}"
-        if padded not in variants:
-            variants.append(padded)
-    return variants
+    cleaned = re.sub(r'["\\*?^]', " ", value or "")
+    return '"' + " ".join(cleaned.split()) + '"'
+
+
+def _cql_title(titel: str) -> str:
+    """
+    Titelbedingung für die DNB-Suche: alle Wörter des Titels ODER die
+    exakte Wortfolge.
+
+    `tit="..."` allein sucht die exakte Wortfolge - ein Gedankenstrich "–"
+    statt "-" oder ein Doppelpunkt ("NieR:Automata") führt dann zu 0
+    Treffern ("Nura – Herr der Yokai": 0 statt 27). `tit all "..."` (alle
+    Wörter, egal was dazwischen steht) findet diese Titel, verfehlt aber
+    solche, die die DNB als ein Wort führt ("Re:Zero": 4 statt 25). Beide
+    zusammen finden jeweils das meiste.
+    """
+    words = re.findall(r"\w+", titel or "")
+    if not words:
+        return f"tit={_cql_term(titel)}"
+    return f'(tit all "{" ".join(words)}" or tit={_cql_term(titel)})'
 
 
 def _record_title_text(record) -> str:
@@ -218,12 +269,120 @@ def _record_title_text(record) -> str:
     return " ".join(text_parts)
 
 
-def _title_matches_band(record, band: int) -> bool:
-    """Prüft, ob die Bandnummer (mit oder ohne führende Null, z.B. "7" oder
-    "07") irgendwo im Titel/Serienfeld des Records vorkommt."""
-    full_text = _record_title_text(record)
-    alternatives = "|".join(re.escape(v) for v in _band_variants(band))
-    return re.search(rf"(?<!\d)(?:{alternatives})(?!\d)", full_text) is not None
+# Unterfelder, in denen die DNB die Bandzählung als eigene Angabe führt:
+# 245$n (Zählung des Teils, z.B. "Blue Lock" $n "26"), 490$v/830$v
+# (Gesamttitel mit Bandangabe, z.B. "Sanda" $v "14"), 800/810/811$v
+# (Gesamttitel über Person/Körperschaft).
+_VOLUME_SUBFIELDS = (("245", "n"), ("490", "v"), ("800", "v"), ("810", "v"), ("811", "v"), ("830", "v"))
+
+# Stärke eines Bandnummer-Treffers (siehe _band_match)
+BAND_IN_FIELD = 2   # Bandnummer im dafür vorgesehenen Unterfeld - zuverlässig
+BAND_IN_TITLE = 1   # nur im Titeltext erkannt - z.B. Sonderausgaben ohne Bandfeld
+
+
+def _record_volume_numbers(record) -> set[int]:
+    """Alle Bandnummern aus den Band-Unterfeldern eines Records (jeweils die
+    erste Zahl, führende Nullen spielen keine Rolle: "07" = 7)."""
+    numbers = set()
+    for tag, code in _VOLUME_SUBFIELDS:
+        for df in _extract_datafields(record, tag):
+            m = re.search(r"\d+", _subfield(df, code) or "")
+            if m:
+                numbers.add(int(m.group()))
+    return numbers
+
+
+def _count_number(text: str, number: int) -> int:
+    """Wie oft `number` als eigenständige Zahl in `text` vorkommt."""
+    return sum(1 for token in re.findall(r"\d+", text or "") if int(token) == number)
+
+
+def _band_match(record, band: int, titel: Optional[str] = None) -> int:
+    """
+    Prüft, ob ein Record der gesuchte Band ist, und liefert die Stärke des
+    Treffers: BAND_IN_FIELD, BAND_IN_TITLE oder 0 (kein Treffer).
+
+    1. Hat der Record eigene Band-Unterfelder (siehe _VOLUME_SUBFIELDS),
+       entscheiden ausschließlich diese. Eine Zahl im Reihentitel ("Kaiju
+       No. 8", "7 Seeds") kann so nicht mehr als Bandnummer durchgehen.
+    2. Sonst (manche Records führen den Band nur im Titel, z.B. "Konosuba!
+       ... Light Novel 10") wird der Titeltext (245 $a/$b/$p) durchsucht.
+       Die Zahl muss dort öfter vorkommen als im gesuchten Reihentitel
+       `titel` selbst - bei "Kaiju No. 8" zählt eine 8 also erst, wenn sie
+       ein zweites Mal auftaucht.
+    """
+    numbers = _record_volume_numbers(record)
+    if numbers:
+        return BAND_IN_FIELD if band in numbers else 0
+
+    parts = []
+    for df in _extract_datafields(record, "245"):
+        for code in ("a", "b", "p"):
+            value = _subfield(df, code)
+            if value:
+                parts.append(value)
+    if _count_number(" ".join(parts), band) > _count_number(titel or "", band):
+        return BAND_IN_TITLE
+    return 0
+
+
+# Begriffe, an denen Sonderausgaben im DNB-Titel (245) bzw. in der
+# Ausgabebezeichnung (250) zu erkennen sind - ermittelt an echten DNB-Daten:
+# "Collector's Edition", "Limited Edition", "Variant Edition",
+# "Tarot-Edition", "Band 30 mit Sammelschuber", "Band 16-20 im Sammelschuber",
+# "mit Acryl-Aufsteller", "Starter Pack", "Bundle", "+ Box",
+# "Sonderausgabe" (250), "NARUTO Massiv", "2in1" ... Bewusst NICHT dabei:
+# Beigaben der normalen Erstauflage wie "Mit Collector's Print als Extra"
+# oder "mit Farbschnitt".
+_SPECIAL_EDITION_PATTERNS = [
+    re.compile(p) for p in (
+        r"\bedition\b", r"schuber", r"sonderausgabe", r"sonderedition", r"\blimit", r"\bvariant",
+        r"\bdeluxe\b", r"acryl", r"\bstarter\b", r"\bbundle\b", r"\bpack\b", r"\bbox\b",
+        r"\bmassiv\b", r"\d\s*in\s*1\b", r"sammelband", r"omnibus",
+    )
+]
+
+# Steuerzeichen, mit denen die DNB nicht mitsortierte Artikel einklammert
+# ("\x98Die\x9c Braut des Magiers")
+_NON_SORT_CHARS = str.maketrans("", "", "\x98\x9c")
+
+
+def _special_edition(record, titel: Optional[str] = None) -> Optional[str]:
+    """
+    Erkennt Sonderausgaben (Collector's/Limited/Variant Edition,
+    Sammelschuber, Bundles, Sammelbände ...) und liefert ihre Bezeichnung
+    für die Anzeige (DNB-Titel, z.B. "Blue Lock – Band 33 – Collector's
+    Edition"), bei normalen Ausgaben None.
+
+    Ein Begriff zählt nur, wenn er im Record öfter vorkommt als im gesuchten
+    Reihentitel `titel` - "Blue Box 17" ist für die Reihe "Blue Box" also
+    eine normale Ausgabe, "Naruto Massiv 5" für die Reihe "Naruto" dagegen
+    eine Sonderausgabe.
+    """
+    main_title = " ".join(
+        value for df in _extract_datafields(record, "245")
+        for value in (_subfield(df, "a"), _subfield(df, "n"), _subfield(df, "p")) if value
+    ).translate(_NON_SORT_CHARS).strip()
+    edition = " ".join(
+        value for df in _extract_datafields(record, "250") for value in [_subfield(df, "a")] if value
+    )
+    subtitle = " ".join(
+        value for df in _extract_datafields(record, "245") for value in [_subfield(df, "b")] if value
+    )
+    record_text = f"{main_title} {subtitle} {edition}".casefold()
+    titel_text = (titel or "").casefold()
+    if not any(len(p.findall(record_text)) > len(p.findall(titel_text)) for p in _SPECIAL_EDITION_PATTERNS):
+        return None
+    if edition and any(p.search(edition.casefold()) for p in _SPECIAL_EDITION_PATTERNS):
+        return f"{main_title} ({edition})"
+    return main_title or "Sonderausgabe"
+
+
+@dataclass
+class Sonderausgabe:
+    """Eine gefundene Sonderausgabe des gesuchten Bandes."""
+    isbn: str
+    bezeichnung: str   # DNB-Titel, z.B. "Dandadan – Band 20 mit Sammelschuber"
 
 
 # Viele Reihen existieren sowohl als Manga/Manhwa-Adaption als auch als
@@ -340,7 +499,7 @@ def _isbn_from_record(record) -> Optional[str]:
 def lookup_isbn_dnb(
     titel: str, band: int, verlag: Optional[str] = None, typ: Optional[str] = None,
     log: Optional[list[str]] = None,
-) -> tuple[Optional[str], str]:
+) -> tuple[Optional[str], str, list[Sonderausgabe]]:
     """
     Sucht die ISBN eines Bandes bei der DNB in bis zu zwei Durchgängen:
 
@@ -354,9 +513,11 @@ def lookup_isbn_dnb(
          Verlagseinschränkung.
 
     Innerhalb der jeweiligen Treffer wird weiterhin zweistufig zugeordnet:
-    zuerst ein Record mit passender Bandnummer UND passendem Verlag
-    (sichere Zuordnung), sonst ein Record mit nur passender Bandnummer
-    (schwächere Zuordnung). In beiden Durchgängen wird zusätzlich per
+    zuerst ein Record mit passender Bandnummer UND passendem Verlag, sonst
+    ein Record mit nur passender Bandnummer. Records, deren Bandnummer im
+    dafür vorgesehenen Unterfeld steht, haben dabei jeweils Vorrang vor
+    solchen, bei denen sie nur im Titeltext erkannt wurde (siehe
+    _band_match). In beiden Durchgängen wird zusätzlich per
     `typ` geprüft, dass es sich nicht erkennbar um die jeweils andere
     Ausgabe (Manga/Manhwa vs. Light Novel) derselben Reihe handelt - z.B.
     bei Reihen wie Konosuba!, die als Manga UND als Light Novel mit
@@ -367,8 +528,17 @@ def lookup_isbn_dnb(
     ist so gut wie nie älter) - das grenzt die ohnehin auf maximal 20
     Treffer begrenzte DNB-Antwort weiter ein.
 
-    Gibt (isbn_oder_None, confidence) zurück, confidence in
-    {"band+verlag", "band_only", "keine"}.
+    Sonderausgaben (Collector's Edition, Sammelschuber ... - siehe
+    _special_edition) werden nie als die ISBN des Bandes gewählt, sondern
+    getrennt als Liste zurückgegeben (Verlag muss passen, sofern der
+    eingetragene Verlag unter den Treffern vorkommt).
+
+    Gibt (isbn_oder_None, confidence, sonderausgaben) zurück, confidence in
+    {"band+verlag", "band_only", "titeltext", "keine"}:
+      - "band+verlag": Bandfeld und Verlag passen (sichere Zuordnung)
+      - "band_only":   Bandfeld passt, Verlag nicht bestätigt
+      - "titeltext":   Bandnummer nur im Titeltext erkannt (z.B.
+                       Sonderausgabe ohne Bandfeld) - bitte prüfen
 
     Ist `log` eine Liste, werden alle abgesetzten SRU-Anfragen (Query +
     volle URL) sowie deren Ergebnisse als Zeilen daran angehängt.
@@ -377,24 +547,48 @@ def lookup_isbn_dnb(
     year_constraint = _year_constraint()
 
     if verlag_term:
-        query = f'tit="{titel}" and mat=books and {year_constraint} and WOE="{verlag_term}"'
-        isbn, confidence = _run_dnb_query(query, "mit Verlag", band, verlag, typ, log)
+        # "vlg" = Index "Verleger/Firma, Ort" (laut explain-Antwort der DNB);
+        # "woe" wäre die Freitextsuche über alle Begriffe.
+        query = f"{_cql_title(titel)} and mat=books and {year_constraint} and vlg={_cql_term(verlag_term)}"
+        isbn, confidence, specials = _run_dnb_query(query, "mit Verlag", titel, band, verlag, typ, log)
         if isbn:
-            return isbn, confidence
+            return isbn, confidence, specials
         time.sleep(REQUEST_DELAY_SECONDS)
+    else:
+        specials = []
 
-    query = f'tit="{titel}" and mat=books and {year_constraint}'
+    query = f"{_cql_title(titel)} and mat=books and {year_constraint}"
     label = "ohne Verlag / Fallback" if verlag_term else "Titel"
-    return _run_dnb_query(query, label, band, verlag, typ, log)
+    isbn, confidence, more_specials = _run_dnb_query(query, label, titel, band, verlag, typ, log)
+    known = {s.isbn for s in specials} | {isbn}
+    specials += [s for s in more_specials if s.isbn not in known]
+    return isbn, confidence, specials
+
+
+def _sru_diagnostics(root) -> list[str]:
+    """Fehlermeldungen einer SRU-Antwort (<diagnostic>), z.B. bei einer
+    ungültigen Anfrage - die DNB liefert dann keine Records, sondern einen
+    solchen Hinweis."""
+    messages = []
+    for diag in root.iter():
+        if diag.tag.rsplit("}", 1)[-1] != "diagnostic":
+            continue
+        texts = [
+            (child.text or "").strip() for child in diag
+            if child.tag.rsplit("}", 1)[-1] in ("message", "details") and (child.text or "").strip()
+        ]
+        messages.append(" - ".join(texts) or "unbekannter Fehler")
+    return messages
 
 
 def _run_dnb_query(
-    query: str, label: str, band: int, verlag: Optional[str], typ: Optional[str],
+    query: str, label: str, titel: str, band: int, verlag: Optional[str], typ: Optional[str],
     log: Optional[list[str]],
-) -> tuple[Optional[str], str]:
+) -> tuple[Optional[str], str, list[Sonderausgabe]]:
     """Führt eine einzelne SRU-Anfrage aus, sucht in den Treffern nach der
     Bandnummer (Verlag und Typ als Zuordnungskriterien) und protokolliert
-    Anfrage + Ergebnis. Gibt (isbn_oder_None, confidence) zurück."""
+    Anfrage + Ergebnis. Gibt (isbn_oder_None, confidence, sonderausgaben)
+    zurück - die ISBN ist immer die einer normalen Ausgabe."""
     params = {
         "version": "1.1",
         "operation": "searchRetrieve",
@@ -415,63 +609,104 @@ def _run_dnb_query(
     except requests.RequestException as exc:
         if log is not None:
             log.append(f"  DNB SRU Fehler ({label}):   {exc}")
-        return None, "keine"
+        return None, "keine", []
 
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError as exc:
         if log is not None:
             log.append(f"  DNB SRU Fehler ({label}):   Antwort ist kein gültiges XML ({exc})")
-        return None, "keine"
+        return None, "keine", []
+
+    diagnostics = _sru_diagnostics(root)
+    if diagnostics:
+        if log is not None:
+            log.append(f"  DNB SRU Fehler ({label}):   {'; '.join(diagnostics)}")
+        return None, "keine", []
 
     # "{*}" = dieses Element unabhängig vom Namespace/Namespace-Präfix -
     # robust gegenüber Formatierungsdetails der DNB-Antwort, die ein
     # starres Regex-Muster sonst leicht lautlos zum Scheitern bringen
-    # könnten (z.B. ein Namespace-Präfix wie "<marc:datafield>").
-    records = root.findall(".//{*}record")
-    band_candidates = [r for r in records if _title_matches_band(r, band)]
+    # könnten (z.B. ein Namespace-Präfix wie "<marc:datafield>"). Die
+    # SRU-Hülle heißt ebenfalls <record>; gezählt werden nur die
+    # eigentlichen MARC-Records (die mit <datafield>-Einträgen).
+    records = [r for r in root.findall(".//{*}record") if r.find("{*}datafield") is not None]
+    scored = [(r, _band_match(r, band, titel)) for r in records]
+    # Treffer im Bandfeld zuerst (sorted ist stabil: die DNB-Reihenfolge
+    # bleibt innerhalb derselben Stärke erhalten)
+    band_candidates = [(r, s) for r, s in sorted(scored, key=lambda rs: -rs[1]) if s]
     # Records, die erkennbar zur jeweils ANDEREN Ausgabe (Manga vs. Light
     # Novel) gehören, werden von vornherein ausgeschlossen - unabhängig
     # vom Verlags-Durchgang.
-    type_ok_candidates = [r for r in band_candidates if _type_matches(r, typ)]
+    type_ok_candidates = [(r, s) for r, s in band_candidates if _type_matches(r, typ)]
     excluded_wrong_type = len(band_candidates) - len(type_ok_candidates)
+
+    # Sonderausgaben (Collector's Edition, Sammelschuber ...) von den
+    # normalen Ausgaben trennen: gewählt wird nur eine normale Ausgabe.
+    normal_candidates = []
+    special_candidates = []
+    for record, strength in type_ok_candidates:
+        bezeichnung = _special_edition(record, titel)
+        if bezeichnung is None:
+            normal_candidates.append((record, strength))
+        else:
+            special_candidates.append((record, bezeichnung))
 
     result_isbn: Optional[str] = None
     result_confidence = "keine"
 
     # 1. Durchgang: Band + Verlag
-    for record in type_ok_candidates:
+    for record, strength in normal_candidates:
         if _publisher_matches(record, verlag):
             isbn = _isbn_from_record(record)
             if isbn:
-                result_isbn, result_confidence = isbn, "band+verlag"
+                result_isbn = isbn
+                result_confidence = "band+verlag" if strength == BAND_IN_FIELD else "titeltext"
                 break
 
     # 2. Durchgang: nur Band (schwächere Zuordnung)
     if result_isbn is None:
-        for record in type_ok_candidates:
+        for record, strength in normal_candidates:
             isbn = _isbn_from_record(record)
             if isbn:
-                result_isbn, result_confidence = isbn, "band_only"
+                result_isbn = isbn
+                result_confidence = "band_only" if strength == BAND_IN_FIELD else "titeltext"
                 break
 
+    # Sonderausgaben: nur die des eingetragenen Verlags - sofern dieser unter
+    # den Treffern überhaupt vorkommt. Sonst ist der Verlag im Eintrag
+    # vermutlich veraltet (wie beim 2. Durchgang oben) und alle zählen.
+    # Jede ISBN nur einmal.
+    publisher_found = any(_publisher_matches(r, verlag) for r, _s in type_ok_candidates)
+    specials: list[Sonderausgabe] = []
+    for record, bezeichnung in special_candidates:
+        if publisher_found and not _publisher_matches(record, verlag):
+            continue
+        isbn = _isbn_from_record(record)
+        if isbn and isbn != result_isbn and all(s.isbn != isbn for s in specials):
+            specials.append(Sonderausgabe(isbn, bezeichnung))
+
     if log is not None:
+        in_field = sum(1 for _r, s in band_candidates if s == BAND_IN_FIELD)
         exclude_note = (
             f", davon {excluded_wrong_type} Treffer als andere Ausgabe (Manga/Light Novel) ausgeschlossen"
             if excluded_wrong_type else ""
         )
         log.append(
             f"  DNB SRU Treffer ({label}):  {len(records)} Records gesamt, "
-            f"{len(band_candidates)} mit passender Bandnummer "
-            f"({'/'.join(_band_variants(band))})"
+            f"{len(band_candidates)} mit Band {band} "
+            f"({in_field} im Bandfeld, {len(band_candidates) - in_field} nur im Titeltext, "
+            f"{len(special_candidates)} Sonderausgaben)"
             + exclude_note
         )
         if result_isbn:
             log.append(f"  DNB SRU Ergebnis ({label}): ISBN {result_isbn} (Zuordnung: {result_confidence})")
         else:
-            log.append(f"  DNB SRU Ergebnis ({label}): kein Treffer")
+            log.append(f"  DNB SRU Ergebnis ({label}): keine normale Ausgabe gefunden")
+        for special in specials:
+            log.append(f"  DNB SRU Sonderausgabe ({label}): ISBN {special.isbn} – {special.bezeichnung}")
 
-    return result_isbn, result_confidence
+    return result_isbn, result_confidence, specials
 
 
 def manga_passion_search_url(titel: str) -> str:
@@ -516,18 +751,20 @@ def fallback_search_url(titel: str) -> str:
 def lookup_isbn(
     titel: str, band: int, verlag: Optional[str] = None, typ: Optional[str] = None,
     log: Optional[list[str]] = None,
-) -> tuple[Optional[str], str]:
+) -> tuple[Optional[str], str, list[Sonderausgabe]]:
     """
     Sucht die ISBN über die DNB (Band+Verlag, dann nur Band als schwächere
     Zuordnung).
-    Gibt (isbn_oder_None, quelle) zurück; quelle in
-    {"dnb (band+verlag)", "dnb (band_only)", "keine"}.
+    Gibt (isbn_oder_None, quelle, sonderausgaben) zurück; quelle in
+    {"dnb (band+verlag)", "dnb (band_only)", "dnb (titeltext)", "keine"}.
+    Die ISBN ist immer die der normalen Ausgabe, Sonderausgaben kommen
+    getrennt (siehe lookup_isbn_dnb).
     """
-    isbn, confidence = lookup_isbn_dnb(titel, band, verlag, typ, log=log)
+    isbn, confidence, sonderausgaben = lookup_isbn_dnb(titel, band, verlag, typ, log=log)
     if isbn:
-        return isbn, f"dnb ({confidence})"
+        return isbn, f"dnb ({confidence})", sonderausgaben
 
-    return None, "keine"
+    return None, "keine", sonderausgaben
 
 
 # ---------------------------------------------------------------------------
@@ -543,6 +780,18 @@ class LookupResult:
     isbn: Optional[str]
     quelle: str = "keine"
     fallback_url: Optional[str] = None
+    sonderausgaben: list = field(default_factory=list)   # list[Sonderausgabe]
+
+
+# Markiert in Zusammenfassung und Bestellliste Bände, für die es eine
+# normale UND eine Sonderausgabe gibt - das Ergebnisfenster hebt Zeilen mit
+# diesem Zeichen golden hervor (siehe gui/isbn_view.py).
+SONDERAUSGABE_MARKER = "★"
+
+_UNSICHER_GRUND = {
+    "band_only": "Verlag nicht bestätigt",
+    "titeltext": "Band nur im Titel erkannt",
+}
 
 
 @dataclass
@@ -551,21 +800,39 @@ class LookupReport:
     nicht_gefunden: list = field(default_factory=list)
     log_path: Optional[str] = None
     log_error: Optional[str] = None
+    gesamt: int = 0             # so viele Titel waren zur Prüfung ausgewählt
+    abgebrochen: bool = False   # vom Nutzer abgebrochen, bevor alle geprüft waren
 
     def summary(self) -> str:
         total = len(self.gefunden) + len(self.nicht_gefunden)
-        lines = [f"{len(self.gefunden)}/{total} ISBNs automatisch gefunden.", ""]
+        lines = [f"{len(self.gefunden)}/{total} ISBNs automatisch gefunden."]
+        if self.abgebrochen:
+            lines.append(
+                f"ABGEBROCHEN: nur {total} von {self.gesamt} Titeln geprüft "
+                "(bereits gefundene ISBNs sind gespeichert)."
+            )
+        lines.append("")
         if self.gefunden:
-            sicher = sum(1 for r in self.gefunden if "band+verlag" in r.quelle)
-            unsicher = sum(1 for r in self.gefunden if "band_only" in r.quelle)
-            lines.append(f"  davon sicher (DNB, Band+Verlag): {sicher}")
-            lines.append(f"  davon unsicher (DNB, nur Band, Verlag nicht bestätigt): {unsicher}")
+            sicher = [r for r in self.gefunden if "band+verlag" in r.quelle]
+            unsicher = [r for r in self.gefunden if "band+verlag" not in r.quelle]
+            lines.append(f"  davon sicher (DNB, Bandfeld + Verlag): {len(sicher)}")
+            lines.append(f"  davon unsicher (Verlag nicht bestätigt oder Band nur im Titel): {len(unsicher)}")
             if unsicher:
                 lines.append("")
                 lines.append("Bitte bei 'unsicher' markierten Titeln die ISBN vor Bestellung kurz prüfen:")
-                for r in self.gefunden:
-                    if "band_only" in r.quelle:
-                        lines.append(f"  - {r.titel} Band {r.band} ({r.verlag}) → ISBN {r.isbn}")
+                for r in unsicher:
+                    grund = next((g for key, g in _UNSICHER_GRUND.items() if key in r.quelle), "unsicher")
+                    lines.append(f"  - {r.titel} Band {r.band} ({r.verlag}) → ISBN {r.isbn} [{grund}]")
+            lines.append("")
+        mit_sonderausgabe = [r for r in self.gefunden + self.nicht_gefunden if r.sonderausgaben]
+        if mit_sonderausgabe:
+            lines.append("Sonderausgaben (zusätzlich in der Bestellliste; golden = normale Ausgabe und Sonderausgabe):")
+            for r in mit_sonderausgabe:
+                prefix = f"  {SONDERAUSGABE_MARKER} " if r.isbn else "  - "
+                normal = f"normale Ausgabe ISBN {r.isbn}" if r.isbn else "keine normale Ausgabe gefunden"
+                lines.append(f"{prefix}{r.titel} Band {r.band}: {normal}")
+                for s in r.sonderausgaben:
+                    lines.append(f"{prefix}    Sonderausgabe ISBN {s.isbn} – {s.bezeichnung}")
             lines.append("")
         if self.nicht_gefunden:
             lines.append("Manuell zu prüfen:")
@@ -584,9 +851,14 @@ def fill_missing_isbns(
     only_month: Optional[tuple[int, int]] = None,  # (monat, jahr), z.B. (9, 2026)
     only_status: Optional[str] = None,              # z.B. "TBA" oder "NA" (Wert in VÖ +1)
     overwrite: bool = False,
+    progress: Optional[Callable[[int, int, str], None]] = None,
+    cancel: Optional[threading.Event] = None,
+    entries: Optional[list] = None,
 ) -> LookupReport:
     """
-    Durchläuft `werke`, ermittelt für jeden Titel den nächsten Band
+    Durchläuft die Einträge (`entries` = Zwischenspeicher der Oberfläche,
+    ohne Angabe die Tabelle `werke`, siehe _entries_with_cache), ermittelt
+    für jeden Titel den nächsten Band
     (baende_bis + 1) und versucht die ISBN über die DNB zu finden.
     Ein Treffer landet in `isbn_cache`, verknüpft mit dem Band-Stand
     (baende_bis) zum Zeitpunkt der Suche - siehe ensure_isbn_cache_table().
@@ -596,6 +868,14 @@ def fill_missing_isbns(
       - `only_month`: Titel, deren VÖ +1 im angegebenen Monat/Jahr liegt.
       - `only_status`: Titel, deren VÖ +1 exakt diesem Text entspricht
         (z.B. "TBA" oder "NA"), unabhängig vom Datum.
+
+    Jede gefundene ISBN wird sofort in `isbn_cache` gespeichert - bei einem
+    Absturz oder Abbruch bleiben die bis dahin gefundenen erhalten.
+
+    `progress(erledigt, gesamt, titel)` wird (falls angegeben) vor jedem
+    geprüften Titel aufgerufen. Ist `cancel` gesetzt (threading.Event),
+    endet der Abgleich nach dem gerade laufenden Titel; der Bericht hat
+    dann `abgebrochen = True`.
 
     Jede abgesetzte SRU-Anfrage und ihr Ergebnis wird
     mitprotokolliert; am Ende wird das komplette Protokoll als eine Datei
@@ -619,6 +899,7 @@ def fill_missing_isbns(
         "=" * 78,
         f"ISBN-Abgleich - gestartet {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}",
         f"Datenbank:          {db_path}",
+        f"Einträge aus:       {'Zwischenspeicher (auch ungespeicherte Änderungen)' if entries is not None else 'Datenbank'}",
         f"Auswahl (VÖ +1):    {auswahl_label}",
         "=" * 78,
         "",
@@ -626,22 +907,21 @@ def fill_missing_isbns(
 
     try:
         cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT w.id, w.titel, w.verlag, w.typ, w.baende_bis, w.voe_1,
-                   c.isbn AS cached_isbn
-            FROM werke w
-            LEFT JOIN isbn_cache c ON c.titel = w.titel AND c.baende_bis = w.baende_bis
-            """
-        )
-        rows = cur.fetchall()
+        selected = [
+            row for row in _entries_with_cache(conn, entries)
+            if _matches_selection(row["voe_1"], only_month, only_status)
+            and (overwrite or not row["cached_isbn"])
+        ]
+        report.gesamt = len(selected)
 
-        for row in rows:
-            if not _matches_selection(row["voe_1"], only_month, only_status):
-                continue
-
-            if row["cached_isbn"] and not overwrite:
-                continue
+        for index, row in enumerate(selected):
+            if cancel is not None and cancel.is_set():
+                report.abgebrochen = True
+                log_lines.append(f"ABGEBROCHEN durch den Nutzer nach {index} von {len(selected)} Titeln.")
+                log_lines.append("")
+                break
+            if progress is not None:
+                progress(index, len(selected), row["titel"])
 
             band = _naechster_band(row["baende_bis"])
             titel = row["titel"]
@@ -665,8 +945,8 @@ def fill_missing_isbns(
                 )
                 continue
 
-            isbn, quelle = lookup_isbn(titel, band, verlag, typ, log=log_lines)
-            time.sleep(REQUEST_DELAY_SECONDS)
+            isbn, quelle, sonderausgaben = lookup_isbn(titel, band, verlag, typ, log=log_lines)
+            now = datetime.now().isoformat(timespec="seconds")
 
             if isbn:
                 cur.execute(
@@ -676,22 +956,44 @@ def fill_missing_isbns(
                     ON CONFLICT (titel, baende_bis)
                     DO UPDATE SET isbn = excluded.isbn, gefunden_am = excluded.gefunden_am
                     """,
-                    (row["titel"], row["baende_bis"], isbn, datetime.now().isoformat(timespec="seconds")),
+                    (row["titel"], row["baende_bis"], isbn, now),
                 )
+            # Sonderausgaben dieses Band-Stands durch das aktuelle Suchergebnis ersetzen
+            cur.execute(
+                "DELETE FROM isbn_sonderausgaben WHERE titel = ? AND baende_bis = ?",
+                (row["titel"], row["baende_bis"]),
+            )
+            cur.executemany(
+                "INSERT INTO isbn_sonderausgaben (titel, baende_bis, isbn, bezeichnung, gefunden_am) "
+                "VALUES (?, ?, ?, ?, ?)",
+                [(row["titel"], row["baende_bis"], s.isbn, s.bezeichnung, now) for s in sonderausgaben],
+            )
+            conn.commit()  # sofort sichern - ein späterer Absturz/Abbruch verliert den Treffer nicht
+
+            for s in sonderausgaben:
+                log_lines.append(f"  SONDERAUSGABE: ISBN {s.isbn} – {s.bezeichnung}")
+            if isbn:
                 log_lines.append(f"  ERGEBNIS: ISBN {isbn} übernommen (Quelle: {quelle})")
                 report.gefunden.append(
-                    LookupResult(row["id"], titel, row["verlag"], band, isbn, quelle)
+                    LookupResult(row["id"], titel, row["verlag"], band, isbn, quelle, sonderausgaben=sonderausgaben)
                 )
             else:
                 fallback_url = fallback_search_url(titel)
-                log_lines.append(f"  ERGEBNIS: keine ISBN gefunden. Fallback-Link: {fallback_url}")
+                log_lines.append(f"  ERGEBNIS: keine ISBN der normalen Ausgabe gefunden. Fallback-Link: {fallback_url}")
                 report.nicht_gefunden.append(
                     LookupResult(
                         row["id"], titel, row["verlag"], band, None, quelle,
-                        fallback_url=fallback_url,
+                        fallback_url=fallback_url, sonderausgaben=sonderausgaben,
                     )
                 )
             log_lines.append("")
+
+            if index < len(selected) - 1:
+                # freundlich zur DNB; ein Abbruch beendet die Wartezeit sofort
+                if cancel is not None:
+                    cancel.wait(REQUEST_DELAY_SECONDS)
+                else:
+                    time.sleep(REQUEST_DELAY_SECONDS)
 
         conn.commit()
     finally:
@@ -703,7 +1005,7 @@ def fill_missing_isbns(
     log_lines.append("=" * 78)
 
     try:
-        report.log_path = _write_log_file(log_lines)
+        report.log_path = changelog.write_isbn_log(log_lines)
     except OSError as exc:
         report.log_error = str(exc)
 
@@ -711,65 +1013,69 @@ def fill_missing_isbns(
 
 
 # ---------------------------------------------------------------------------
-# Fertige Bestellliste mit Konold-Links generieren
+# Fertige Bestellliste mit Links zum gewählten Buchhändler
 # ---------------------------------------------------------------------------
-
-def konold_url(isbn: str) -> str:
-    """
-    Verlinkt eine gefundene ISBN zum gewählten Online-Buchhändler (Name
-    historisch: Standard ist Konold). Welcher Anbieter gilt, wird im Dialog
-    "ISBN-Abgleich / Bestellliste" per Dropdown gewählt (z.B. Thalia) und in
-    config.json gemerkt; der Standard-Buchhändler selbst ist über
-    "isbn_shop_name"/"isbn_shop_url_template" einstellbar - siehe shops.py.
-    """
-    return shops.order_url(isbn)
-
 
 def bestellliste_markdown(
     db_path: str,
     month: Optional[int] = None,
     year: Optional[int] = None,
     status: Optional[str] = None,
+    entries: Optional[list] = None,
 ) -> str:
-    """Erzeugt eine fertige Markdown-Bestellliste mit Konold-Links.
+    """Erzeugt eine fertige Markdown-Bestellliste mit Links zum gewählten
+    Buchhändler (siehe shops.py) - aus `entries` (Zwischenspeicher) bzw.
+    ohne Angabe aus der Tabelle `werke`.
     Entweder für Titel, deren VÖ+1 im angegebenen Monat/Jahr liegt
     (month + year), oder für Titel mit einem bestimmten VÖ+1-Status
-    (status, z.B. "TBA" oder "NA")."""
+    (status, z.B. "TBA" oder "NA").
+
+    Je Titel steht zuerst die normale Ausgabe (oder ein Fallback-Suchlink),
+    darunter jede bekannte Sonderausgabe als eigene Zeile ("↳ Sonderausgabe:
+    ..."). Gibt es für den Band beide, beginnen alle Zeilen dieses Titels
+    mit SONDERAUSGABE_MARKER - das Ergebnisfenster hebt sie golden hervor."""
     ensure_isbn_cache_table(db_path)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     try:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT w.titel, w.verlag, w.baende_bis, w.voe_1, c.isbn AS cached_isbn
-            FROM werke w
-            LEFT JOIN isbn_cache c ON c.titel = w.titel AND c.baende_bis = w.baende_bis
-            """
-        )
-        rows = cur.fetchall()
+        rows = _entries_with_cache(conn, entries)
+        specials = {}
+        for s in conn.execute("SELECT titel, baende_bis, isbn, bezeichnung FROM isbn_sonderausgaben ORDER BY rowid"):
+            specials.setdefault((s["titel"], s["baende_bis"]), []).append(s)
     finally:
         conn.close()
 
     only_month = (month, year) if (month and year) else None
 
-    zeilen = []
+    def cell(value) -> str:
+        return str(value if value is not None else "").replace("|", "/")  # "|" würde die Tabelle zerschneiden
+
+    gruppen = []
     for row in rows:
         if not _matches_selection(row["voe_1"], only_month, status):
             continue
         band = _naechster_band(row["baende_bis"])
+        row_specials = specials.get((row["titel"], row["baende_bis"]), [])
+        marker = f"{SONDERAUSGABE_MARKER} " if row["cached_isbn"] and row_specials else ""
+        prefix = f"| {cell(row['voe_1'])} | {marker}"
+        suffix = f" | {cell(row['verlag'])} | {cell(band)} |"
         if row["cached_isbn"]:
-            link = konold_url(row["cached_isbn"])
-            zeilen.append((row["voe_1"], row["titel"], row["verlag"], band, row["cached_isbn"], link))
+            zeilen = [f"{prefix}{cell(row['titel'])}{suffix} {row['cached_isbn']} | [öffnen]({shops.order_url(row['cached_isbn'])}) |"]
         else:
-            zeilen.append((row["voe_1"], row["titel"], row["verlag"], band, "—", fallback_search_url(row["titel"])))
-
-    zeilen.sort(key=lambda z: (z[0] or ""))
+            zeilen = [f"{prefix}{cell(row['titel'])}{suffix} — | [öffnen]({fallback_search_url(row['titel'])}) |"]
+        for s in row_specials:
+            zeilen.append(
+                f"{prefix}↳ Sonderausgabe: {cell(s['bezeichnung'])}{suffix} {s['isbn']} | [öffnen]({shops.order_url(s['isbn'])}) |"
+            )
+        # Chronologisch nach VÖ +1 (echte Datumswerte, nicht als Text - sonst
+        # stünde "5.09.2026" hinter "15.09.2026"), bei gleichem Datum nach Titel
+        gruppen.append(((sorting.sort_key("voe_1", row["voe_1"]), (row["titel"] or "").lower()), zeilen))
+    gruppen.sort(key=lambda g: g[0])
 
     titel_zeile = f"# Bestellliste {month:02d}/{year}" if only_month else f"# Bestellliste – VÖ +1 = {status}"
     out = [titel_zeile, "", f"Buchhändler: {shops.active_name()}", "", "| Datum | Titel | Verlag | Band | ISBN | Link |", "|---|---|---|---|---|---|"]
-    for datum, titel, verlag, band, isbn, link in zeilen:
-        out.append(f"| {datum} | {titel} | {verlag} | {band} | {isbn} | [öffnen]({link}) |")
+    for _key, zeilen in gruppen:
+        out.extend(zeilen)
     return "\n".join(out)
 
 

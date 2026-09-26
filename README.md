@@ -118,13 +118,45 @@ Nach dem Start:
    (`Bände (bis) + 1`) bei der Deutschen Nationalbibliothek (DNB) gesucht
    – eingeschränkt auf Bücher, die im **aktuellen Kalenderjahr oder dem
    Folgejahr** erschienen sind (automatisch anhand des Systemdatums
-   ermittelt, kein fester Jahreswert) – Bandnummern werden dabei sowohl
-   mit als auch ohne führende Null erkannt (z. B. Band 7 als „7“ oder als
-   „07“). Ist ein Verlag hinterlegt, wird zuerst direkt danach
-   eingeschränkt gesucht (die DNB liefert pro Anfrage maximal 20 Treffer –
+   ermittelt, kein fester Jahreswert). Ist ein Verlag hinterlegt, wird
+   zuerst direkt danach eingeschränkt gesucht (DNB-Index `vlg`
+   „Verleger/Firma, Ort“; die DNB liefert pro Anfrage maximal 20 Treffer –
    bei umfangreichen/gleichnamigen Reihen kann der gesuchte Band sonst
    außerhalb dieser ersten 20 liegen); findet das nichts, folgt
-   automatisch ein Fallback ohne Verlagseinschränkung. Manche Reihen
+   automatisch ein Fallback ohne Verlagseinschränkung. Gesucht wird nach
+   **allen Wörtern des Titels oder der exakten Wortfolge**: Die Wortfolge
+   allein findet Titel mit Gedankenstrich oder Doppelpunkt nicht, sobald die
+   DNB sie etwas anders schreibt („Nura – Herr der Yokai“ gegenüber „Nura -
+   Herr der Yokai“, „NieR:Automata“), die Wörtersuche allein verfehlt
+   dagegen Titel, die die DNB als ein Wort führt („Re:Zero“). Zeichen, die
+   in der DNB-Suchsprache eine Sonderbedeutung haben (`"`, `\`, `*`, `?`,
+   `^`), werden aus dem Titel entfernt – ein „?“ im Titel wirkte sonst als
+   Platzhalter und fand gar nichts.
+
+   **Bandnummer:** Maßgeblich sind die Felder, in denen die DNB die
+   Bandzählung eigens führt (MARC `245$n`, `490$v`/`830$v` u. a.). Eine
+   Zahl im Reihentitel („Kaiju No. 8“, „7 Seeds“) gilt so nicht als
+   Bandnummer. Nur wenn ein Datensatz keine solchen Felder hat, wird der
+   Titeltext durchsucht (z. B. „Konosuba! … Light Novel 10“); die Zahl muss
+   dort öfter vorkommen als im Reihentitel selbst. Datensätze mit Bandfeld
+   haben Vorrang – so gewinnt der reguläre Band vor Sonderausgaben wie
+   „Band 16-20 im Sammelschuber“. Führende Nullen spielen keine Rolle
+   („07“ = 7). Übernommen wird nur eine ISBN mit gültiger Prüfziffer.
+
+   **Sonderausgaben:** Collector's/Limited/Variant Edition, Ausgaben mit
+   (Sammel-)Schuber oder Acryl-Aufsteller, Starter Packs, Bundles,
+   Sammelbände („Massiv“, „2in1“) und als „Sonderausgabe“ bezeichnete
+   Ausgaben werden am DNB-Titel bzw. an der Ausgabebezeichnung erkannt. Sie
+   werden **nie** als ISBN des Bandes übernommen – dort steht immer die
+   normale Ausgabe –, sondern zusätzlich aufgeführt. Ein Begriff zählt nur,
+   wenn er nicht schon im eigenen Reihentitel steht („Blue Box 17“ ist für
+   die Reihe „Blue Box“ eine normale Ausgabe). Beigaben der normalen
+   Erstauflage („mit Collector's Print als Extra“, „mit Farbschnitt“) gelten
+   nicht als Sonderausgabe. Gezeigt werden die Sonderausgaben des
+   eingetragenen Verlags; kommt dieser unter den DNB-Treffern gar nicht vor
+   (Verlag im Eintrag vermutlich veraltet), alle.
+
+   Manche Reihen
    (z. B. Konosuba!) erscheinen sowohl als Manga als auch als Light Novel,
    teils sogar beim selben Verlag – Verlag allein reicht dann nicht zur
    Unterscheidung. Deshalb wird zusätzlich anhand des Feldes „Typ“ des
@@ -132,9 +164,16 @@ Nach dem Start:
    „Light Novel“ explizit enthalten (üblich bei deutschen
    Light-Novel-Ausgaben), bei „Manga“/„Manhwa“ wird ein Treffer
    ausgeschlossen, dessen Titel „Light Novel“ enthält.
-2. Gefundene ISBNs werden in einer eigenen Tabelle `isbn_cache`
-   gespeichert (Schlüssel: Titel + der Band-Stand „Bände (bis)“, für den
-   gesucht wurde) und auf den in der Konfiguration hinterlegten
+2. Gefundene ISBNs der normalen Ausgabe werden in einer eigenen Tabelle
+   `isbn_cache` gespeichert (Schlüssel: Titel + der Band-Stand „Bände
+   (bis)“, für den gesucht wurde), Sonderausgaben mit demselben Schlüssel
+   in `isbn_sonderausgaben` (auch wenn es noch keine normale Ausgabe gibt;
+   eine erneute Suche ersetzt sie). Titel, für die bisher nur eine
+   Sonderausgabe bekannt ist, werden beim nächsten Abgleich erneut
+   gesucht. ISBNs, die eine frühere Programmversion noch ohne diese
+   Unterscheidung gespeichert hat, lassen sich mit „Vorhandene ISBNs
+   erneut prüfen“ korrigieren. Die ISBNs werden auf den in der
+   Konfiguration hinterlegten
    Online-Buchhändler verlinkt (Standard: Konold,
    `isbn_shop_name`/`isbn_shop_url_template` in `config.json` – siehe
    Abschnitt „Zentrale Konfiguration“). Im Dialog „ISBN-Abgleich /
@@ -158,36 +197,50 @@ Nach dem Start:
 4. Ein **eigenes Ergebnisfenster** öffnet sich mit einer Zusammenfassung
    (wie viele automatisch gefunden wurden, wie sicher der Treffer war) und
    einer fertigen **Bestellliste** (Markdown-Tabelle mit direkten
-   Konold-Links), die sich per Knopfdruck in die Zwischenablage kopieren
-   lässt.
+   Konold-Links, chronologisch nach VÖ +1 sortiert), die sich per
+   Knopfdruck in die Zwischenablage kopieren lässt. **Sicher** ist ein
+   Treffer, wenn Bandfeld und Verlag passen; als **unsicher** (bitte vor
+   der Bestellung prüfen) werden Treffer mit Grund aufgeführt, wenn der
+   Verlag nicht bestätigt ist oder die Bandnummer nur im Titel erkannt
+   wurde. Unter jedem Titel stehen seine Sonderausgaben als eigene Zeilen
+   („↳ Sonderausgabe: …“ mit eigener ISBN und Bestell-Link). Gibt es für
+   den Band **eine normale und eine Sonderausgabe**, sind alle Zeilen dieses
+   Titels mit **★** gekennzeichnet und im Ergebnisfenster **golden**
+   hinterlegt – auch in der Zusammenfassung, die die Sonderausgaben
+   zusätzlich auflistet.
 
-Da der Abgleich direkt in der Datenbankdatei sucht und schreibt, fragt das
-Programm bei ungespeicherten Änderungen zuerst, ob gespeichert werden
-soll. Titel ohne automatischen Treffer werden im Ergebnisfenster rot
+Der Abgleich arbeitet mit dem aktuellen Stand im Zwischenspeicher – auch
+mit noch nicht gespeicherten Änderungen –, vorher speichern ist also nicht
+nötig. In die Datenbankdatei schreibt er nur die ISBN-Tabellen, nie die
+Einträge selbst. Titel ohne automatischen Treffer werden im Ergebnisfenster rot
 hervorgehoben und mit einem Suchlink des konfigurierten Fallback-Anbieters
 (Standard: buchhandel.de, siehe `isbn_fallback_provider`) zur manuellen
 Prüfung aufgelistet – so sind sie auf einen Blick von den automatisch
 gefundenen Treffern zu unterscheiden. Alle Links im Ergebnisfenster
-(Konold- wie manga-passion.de-Links) sind anklickbar und öffnen sich
+(Buchhändler- wie Fallback-Links) sind anklickbar und öffnen sich
 direkt im Standardbrowser.
 
-Der Abgleich läuft im Hintergrund (die Oberfläche bleibt bedienbar) und
-kann je nach Anzahl der Titel im gewählten Monat ein bis zwei Minuten
-dauern (aus Rücksicht auf die abgefragten APIs wird zwischen den Anfragen
-kurz gewartet).
+Der Abgleich läuft im Hintergrund und kann je nach Anzahl der Titel
+einige Minuten dauern (aus Rücksicht auf die DNB wird zwischen den
+Anfragen kurz gewartet). Das Fortschrittsfenster zeigt „Titel x von y“
+und hat einen Knopf **„Abbrechen“**: Der gerade laufende Titel wird noch
+fertig geprüft, danach erscheint das Ergebnisfenster mit den bis dahin
+geprüften Titeln (im Fenstertitel als „abgebrochen“ gekennzeichnet).
+Jede gefundene ISBN wird sofort gespeichert – bei einem Abbruch oder
+Absturz gehen bereits gefundene ISBNs nicht verloren.
 
 Die DNB-Antworten werden über eine echte XML-Bibliothek
 (`xml.etree.ElementTree`, Python-Standardbibliothek) ausgewertet statt per
 regulärem Ausdruck – robuster gegenüber Formatierungsdetails wie
-Namespace-Präfixen, und liefert bei einer fehlerhaften/unerwarteten
-Antwort eine klare Fehlermeldung im Log statt lautlos nichts zu finden.
+Namespace-Präfixen. Meldet die DNB einen Fehler (z. B. eine ungültige
+Anfrage), steht die Meldung im Log, statt lautlos „0 Treffer“ zu melden.
 
 ### Log-Datei
 
 Jeder Abgleich schreibt zusätzlich eine vollständige Log-Datei in einen
 Ordner **`LOG`** neben der `.exe` (bzw. neben `main.py` im Quellcode-
 Betrieb). Der Dateiname enthält Datum und Uhrzeit, z. B.
-`LOG/isbn_abgleich_2026-09-04_14-32-05.log`. Es bleiben nur die neuesten
+`LOG/isbn_abgleich_2026-09-04_14-32-05-123.log`. Es bleiben nur die neuesten
 **10** Logdateien liegen – ältere werden nach jedem Abgleich und beim
 Programmstart automatisch gelöscht. Die Anzahl ist in der `config.json`
 über `isbn_log_keep` einstellbar (mindestens 1).
@@ -196,11 +249,13 @@ Darin steht für **jeden** durchsuchten Titel:
 - jede abgesetzte DNB-SRU-Anfrage (CQL-Query und vollständige URL) – bei
   bekanntem Verlag also die verlagseingeschränkte Anfrage sowie ggf. die
   Fallback-Anfrage ohne Verlag
-- die geprüften Bandvarianten (mit und ohne führende Null, z. B. „7“/„07“)
 - die Anzahl der gefundenen DNB-Records je Anfrage und wie viele davon zur
-  Bandnummer passten
+  Bandnummer passten (getrennt nach „im Bandfeld“ und „nur im Titeltext“,
+  dazu die Zahl der Sonderausgaben) sowie jede gefundene Sonderausgabe
+  mit ISBN und DNB-Titel
+- eine Fehlermeldung der DNB, falls die Anfrage abgelehnt wurde
 - das Ergebnis (gefundene ISBN inkl. Zuordnungssicherheit, oder „kein
-  Treffer“)
+  Treffer“) – bei einem Abbruch außerdem, nach wie vielen Titeln
 
 Das ist besonders hilfreich, um bei nicht gefundenen Bänden nachzuvoll-
 ziehen, ob z. B. der Titel bei der DNB anders geschrieben ist oder die
@@ -248,6 +303,11 @@ ist aber per `.gitignore` vom Repository ausgeschlossen (nicht auf GitHub).
 Der Import überspringt Titel, die bereits vorhanden sind – ein mehrfacher
 Import erzeugt also keine Duplikate.
 
+Trennzeichen (Komma, Semikolon oder Tab) und Zeichensatz (UTF-8 oder das
+von älteren Excel-Versionen verwendete Windows-1252) erkennt der Import
+selbst – sowohl die ursprüngliche Liste (Komma) als auch eigene Exporte
+(Semikolon) lassen sich einlesen.
+
 Die Kopfzeile der CSV-Datei wird geprüft: Erkennt das Programm sowohl die
 Beschriftungen der ursprünglichen Liste als auch die des CSV-Exports
 (auch bei vertauschter Spaltenreihenfolge), werden die Spalten automatisch
@@ -288,6 +348,10 @@ markiert.
   (Legende unten: „Titel bestellt“). Nach dem Einlesen zeigt ein Fenster,
   wie viele Titel markiert wurden und – unter „Details“ – welche Artikel
   keinem Eintrag zugeordnet werden konnten oder schon im Bestand sind.
+- Die Markierung merkt sich **den bestellten Band** (Tooltip über dem
+  Titel, z. B. „Band 14 bestellt“). Stehen mehrere Bände desselben Titels
+  in einer Bestellung, gilt der höchste; eine spätere Bestellung eines
+  höheren Bandes hebt die Markierung entsprechend an.
 - **Abholbereit/angekommen:** Kommt später die Mail „Ihre Bestellung ist in
   Ihrer Buchhandlung abholbereit“, wird sie auf denselben Wegen (Datei,
   Drag & Drop, Postfach) erkannt – an der Struktur der Artikeltabelle, nicht
@@ -295,10 +359,17 @@ markiert.
   links** in der Titelzelle (Legende: „angekommen“). Die hellblaue
   Bestell-Markierung bleibt dabei erhalten, beide Markierungen können also
   gleichzeitig sichtbar sein.
-- Klickt man bei „Bände (bis)“ auf **+1**, verschwinden **beide**
-  Markierungen dieses Titels (hellblau und roter Balken). Von Hand
-  entfernen geht per Rechtsklick auf die Zeile → „Bestellt-/Angekommen-
-  Markierung entfernen“.
+- Eine Markierung verschwindet, sobald „Bände (bis)“ ihren Band erreicht –
+  per **+1** oder beim Hochsetzen im Bearbeiten-Formular. Beispiel: Band 12
+  im Bestand, Band 14 bestellt – ein „+1“ auf 13 lässt die Markierung
+  stehen, erst bei 14 entfällt sie. Von Hand entfernen geht per Rechtsklick
+  auf die Zeile → „Bestellt-/Angekommen-Markierung entfernen“.
+- Markierungen aus früheren Programmversionen (dort nur „ja/nein“) werden
+  beim ersten Start automatisch auf „nächster Band“ (`Bände (bis)` + 1)
+  umgestellt – genau das bedeuteten sie bisher.
+- Eine einzelne defekte oder ungewöhnliche Mail (z. B. unbekannter
+  Zeichensatz) bricht den Import nicht ab: Sie wird als „nicht lesbar“
+  gemeldet, die übrigen Mails werden trotzdem ausgewertet.
 - **Ein-/Ausschalten:** Unter *Konfigurieren → Farben* lassen sich
   „Titel bestellt (hellblau)“ und „Titel angekommen (roter Balken links)“
   wie die übrigen Farbcodierungen einzeln an- und ausschalten
@@ -357,10 +428,14 @@ Menü **Datei → CSV exportieren …** → Speicherort wählen. Exportiert wird
 aktuelle Stand im Zwischenspeicher (also inkl. noch nicht gespeicherter
 Änderungen) mit allen regulären Spalten und sprechenden
 Spaltenüberschriften in der ersten Zeile – z.B. zur Weiterverwendung in
-Excel oder als Sicherungskopie außerhalb der Datenbank. Weder die ISBN
-(liegt in der separaten `isbn_cache`-Tabelle, siehe Abschnitt
-„ISBN-Abgleich“ oben) noch die Spalte „Rückstand“ (nur live berechnet,
-nie gespeichert) sind enthalten.
+Excel oder als Sicherungskopie außerhalb der Datenbank. Getrennt wird mit
+**Semikolon** (UTF-8 mit BOM): So öffnet Excel mit deutschen Einstellungen
+die Datei per Doppelklick direkt in Spalten, mit Komma landete dort alles in
+Spalte A. Das Trennzeichen ist über `csv_delimiter` in der `config.json`
+einstellbar. Weder die ISBN (liegt in der separaten `isbn_cache`-Tabelle,
+siehe Abschnitt „ISBN-Abgleich“ oben) noch die Bestellt-/Angekommen-
+Markierungen oder die Spalte „Rückstand“ (nur live berechnet, nie
+gespeichert) sind enthalten.
 
 ## Bedienung
 
@@ -396,11 +471,11 @@ nie gespeichert) sind enthalten.
 - **Ziehen am rechten Rand einer Spaltenüberschrift** – passt die
   Spaltenbreite an (native Qt-Funktion des Tabellenkopfs)
 - **↶ Rückgängig / ↷ Wiederholen** (auch Strg+Z / Strg+Umschalt+Z) – macht
-  die letzte Änderung (Anlegen, Bearbeiten, Löschen, „+1“, CSV-Import)
-  rückgängig bzw. wiederholt sie. Bezieht sich nur auf den Zwischenspeicher;
-  ein Google-Drive-Download oder ein abgeschlossener ISBN-Abgleich setzen
-  die Rückgängig-Historie zurück, da sie den Bestand direkt von außen
-  ersetzen.
+  die letzte Änderung (Anlegen, Bearbeiten, Löschen, „+1“, CSV-Import,
+  Bestell-Markierungen) rückgängig bzw. wiederholt sie. Bezieht sich nur auf
+  den Zwischenspeicher; ein Google-Drive-Download setzt die Rückgängig-
+  Historie zurück, da er den Bestand von außen ersetzt. Abgelehnte Aktionen
+  (z. B. „+1“ über „Bände (bis)“ hinaus) erzeugen keinen Rückgängig-Schritt.
 - **„Nach Bearbeitung zur Zeile springen“** – Schalter im Menü „Konfigurieren“
   (Startwert kommt aus der Konfigurationsdatei, siehe unten). Da eine
   Änderung (z. B. ein „+1“-Klick) den Eintrag durch die Neusortierung an
@@ -408,12 +483,22 @@ nie gespeichert) sind enthalten.
   automatisch mit. Bei deaktiviertem Schalter bleibt die aktuelle
   Scroll-Position stattdessen unverändert erhalten. Die Einstellung wird
   bei jeder Änderung sofort dauerhaft gespeichert.
-- **💾 Speichern** – schreibt alle gepufferten Änderungen in die Datenbank
+- **💾 Speichern** (Strg+S) – schreibt alle gepufferten Änderungen in die Datenbank
 - **Konfigurieren → Konfiguration …** – öffnet die zentrale Konfigurationsdatei direkt zum
   Bearbeiten (siehe eigener Abschnitt unten)
 
 Die Felder „Typ“, „Komplett“, „Beendet“ und „Verlag“ sind als Dropdown
 vorausgefüllt, lassen sich aber auch frei eintippen.
+
+Beim Übernehmen prüft das Formular die Eingaben und nennt alle Probleme auf
+einmal:
+- Der Titel ist Pflicht und darf nicht schon vorkommen (Groß-/Kleinschreibung
+  egal) – doppelte Titel würden ISBN-Abgleich und Bestellzuordnung
+  durcheinanderbringen.
+- „Bände (bis)“ und „Gelesen bis“ sind leer oder ganze Zahlen, und „Gelesen
+  bis“ ist nicht größer als „Bände (bis)“.
+- Datumswerte (Zugang, VÖ) müssen gültig sein (TT.MM.JJJJ oder MM.JJJJ);
+  Freitext wie „TBA“ oder „Band 17 11.06.2025“ bleibt erlaubt.
 
 Die VÖ+1-/Komplett-Beendet-Farblegende steht als dauerhafter Bereich am
 rechten Rand der Fußzeile/Statusleiste, unabhängig von den normalen
@@ -469,9 +554,12 @@ Der Menüpunkt **Konfigurieren → Konfiguration …** (zusammen mit „Nach Bea
 zur Zeile springen“ und der Option „Gestoppt: keine Berechnung“, siehe
 unten) öffnet einen
 Editor für `config.json` (liegt neben der `.exe` bzw. neben `main.py`).
-Der rohe JSON-Inhalt ist direkt bearbeitbar, wird beim Speichern
-validiert und wirkt für die meisten Einstellungen sofort, ohne
-Neustart. Enthält u. a.:
+Der rohe JSON-Inhalt ist direkt bearbeitbar und wirkt für die meisten
+Einstellungen sofort, ohne Neustart. Beim Speichern prüft der Editor nicht
+nur die JSON-Syntax, sondern auch Typ und Wert der bekannten Einstellungen
+(z. B. `true`/`false` statt `"false"` als Text, ganze Zahlen,
+`isbn_shop_url_template` mit `{isbn}`) und speichert erst, wenn alles passt.
+Enthält u. a.:
 
 | Schlüssel | Bedeutung | Standardwert |
 |---|---|---|
@@ -485,11 +573,16 @@ Neustart. Enthält u. a.:
 | `isbn_log_keep` | Wie viele ISBN-Abgleich-Logdateien (`LOG/isbn_abgleich_*.log`) liegen bleiben; die ältesten werden gelöscht (mindestens 1) | `10` |
 | `order_log_keep` | Wie viele Logdateien von „Bestellung einlesen“ (`LOG/bestellung_einlesen_*.log`) liegen bleiben; die ältesten werden gelöscht (mindestens 1) | `10` |
 | `log_retention_days` | Änderungsprotokoll: Einträge älter als so viele Tage wandern ins Archiv | `182` |
+| `csv_delimiter` | Trennzeichen des CSV-Exports: `";"` (Excel mit deutschen Einstellungen), `","` oder `"\t"` (Tab) | `";"` |
 | `db_backup_keep` | Wie viele Datenbank-Sicherungen (`BACKUP/manga_library_*.db`, vor jedem Speichern und vor einem Google-Drive-Download) liegen bleiben; die ältesten werden gelöscht (mindestens 1) | `20` |
 | `colors_enabled` | Farbcodierung je Kategorie (de)aktivieren: `voe1`, `komplett_beendet`, `verlag`, `bestellt`, `angekommen` (jeweils `true`/`false`; auch über *Konfigurieren → Farben* schaltbar). Deaktivierte Kategorien zeigen stattdessen die normale Zebra-Streifung. | alle `true` |
 
 Die Datei lässt sich auch direkt in einem Texteditor bearbeiten (z. B.
-wenn das Programm gerade nicht läuft).
+wenn das Programm gerade nicht läuft). Geschrieben wird sie sicher (erst eine
+temporäre Datei, dann Austausch in einem Schritt). Ist sie beschädigt (kein
+gültiges JSON), meldet das Programm das beim Start und verwendet die
+Standardwerte; beim nächsten Ändern einer Einstellung wird die beschädigte
+Datei als `config.json.defekt` aufbewahrt statt überschrieben.
 
 ### Gestoppt: keine Berechnung
 
@@ -516,7 +609,13 @@ bleiben davon unberührt.
 
 Beim ersten Klick auf „Zu Google Drive sichern“ öffnet sich ein
 Browserfenster zur Anmeldung. Danach wird ein Token in `token.json`
-gespeichert, sodass du dich nicht erneut anmelden musst.
+gespeichert, sodass du dich nicht erneut anmelden musst. Ist das Token
+abgelaufen oder widerrufen, wird automatisch neu angemeldet.
+
+Hoch- und Herunterladen laufen im Hintergrund – die Oberfläche friert
+dabei nicht ein, auch nicht, während die Anmeldung auf den Browser wartet.
+Wird die Anmeldung nicht innerhalb von 5 Minuten abgeschlossen, bricht der
+Vorgang mit einer Meldung ab.
 
 ⚠️ **Wichtig:** `credentials.json` und `token.json` sind persönliche
 Zugangsdaten – nicht weitergeben.
@@ -561,22 +660,27 @@ mangalib/
 │   ├── constants.py      Geteilte Konstanten/Hilfsfunktionen (kein Qt-Code)
 │   ├── table.py          MangaTableModel, CellDelegate (Tabellen-Darstellung)
 │   ├── dialogs.py        EntryDialog, ConfigDialog, IsbnLookupDialog
-│   ├── isbn_view.py       IsbnWorkerSignals, IsbnResultWindow
-│   └── main_window.py     MangaLibraryApp (Hauptfenster, Zwischenspeicher-Logik)
-├── models.py            Werk-Dataclass (formales Datenmodell, dict-kompatibel)
-├── config.py            Zentrale Konfiguration (config.json)
-├── changelog.py         Live-/dauerhaftes Änderungsprotokoll (6-Monats-Archivierung)
-├── database.py        SQLite-Zugriff (load_all / replace_all, PRAGMA-Schema-Version)
-├── logic.py            Reine Berechnung für die "+1"-Aktionen (puffertauglich)
+│   ├── mail_dialogs.py   MailSettingsDialog, MailSelectDialog (Postfach-Abruf)
+│   ├── isbn_view.py      IsbnResultWindow (Ergebnis des ISBN-Abgleichs)
+│   ├── worker.py         AsyncCall (Hintergrund-Aufgaben mit Qt-Signalen)
+│   └── main_window.py    MangaLibraryApp (Hauptfenster)
+├── library.py          Zwischenspeicher mit Rückgängig/Wiederholen (ohne Qt, getestet)
+├── models.py           Werk-Dataclass (formales Datenmodell, dict-kompatibel)
+├── config.py           Zentrale Konfiguration (config.json)
+├── changelog.py        Änderungsprotokoll, Log-Dateien, Fehler-Log
+├── database.py         SQLite-Zugriff, Schema-Versionen, Sicherungen (BACKUP/)
+├── logic.py            "+1"-Aktionen, Markierungen, Formularprüfung
 ├── colors.py           Farbcodierung (VÖ+1, Komplett/Beendet, Verlag, Zebra)
-├── sorting.py           Datums-/zahlenbewusste Sortierschlüssel
-├── isbn_lookup.py       ISBN-Abgleich (DNB) & Bestellliste, eigene isbn_cache-Tabelle
+├── sorting.py          Datums-/zahlenbewusste Sortierschlüssel
+├── isbn_lookup.py      ISBN-Abgleich (DNB) & Bestellliste, isbn_cache/isbn_sonderausgaben
+├── shops.py            Buchhändler-Links für die Bestellliste
 ├── paths.py            Basisverzeichnis - funktioniert auch als gebündelte exe
-├── drive_sync.py        Google-Drive-Sicherung/-Wiederherstellung
+├── drive_sync.py       Google-Drive-Sicherung/-Wiederherstellung
 ├── import_csv.py       CSV-Einlesen (liefert Daten für den Puffer)
+├── csv_export.py       CSV-Export (Semikolon, für Excel)
 ├── order_mail.py       Bestell-E-Mail (.eml) lesen, Artikel den Einträgen zuordnen
 ├── mail_fetch.py       IMAP-Abruf von Bestellbestätigungen (anbieterunabhängig)
-├── tests/               Automatisierte Tests (pytest) für die reinen Logik-Module
+├── tests/              Automatisierte Tests (pytest)
 ├── build.bat            PyInstaller-Buildskript (Windows) für die exe
 ├── requirements.txt    Python-Laufzeit-Abhängigkeiten
 ├── requirements-dev.txt Zusätzlich für Tests: pytest
@@ -585,12 +689,18 @@ mangalib/
 
 ## Automatisierte Tests
 
-Für die reinen Logik-Module (kein Qt/GUI-Code) gibt es eine pytest-Suite
-unter `tests/` – 65 Testfälle für `logic.py` (inkl. "Fortlaufend"- und
-"Gelesen über Bände hinaus"-Sonderfälle), `sorting.py` (Datumserkennung),
-`isbn_lookup.py`-Hilfsfunktionen (ISBN-Bereinigung, Typ-/Bandnummer-
-Abgleich), `import_csv._match_columns` (Kopfzeilen-Erkennung) und die
-Verlagsfarben in `colors.py`.
+Für alle Module ohne Qt-Oberfläche gibt es eine pytest-Suite unter
+`tests/`, u. a.:
+- **Zwischenspeicher** (`library.py`): Rückgängig/Wiederholen, ungespeicherte
+  Änderungen, Markierungen, CSV-Import
+- **„+1“ und Formularprüfung** (`logic.py`)
+- **Datenbank:** Migrationen, atomares Speichern, Sicherungen, Austausch der
+  Datenbankdatei
+- **ISBN-Abgleich:** Bandnummer, Sonderausgaben, Prüfziffer, Suchanfrage –
+  mit nachgebauten DNB-Antworten, ohne Netzwerk
+- **Bestell-Mails und Postfach-Abruf** (mit nachgebautem IMAP-Server)
+- **Weitere:** Konfiguration, CSV-Export/-Import, Google-Drive-Download (mit
+  nachgebautem Dienst), Protokolle
 
 ```
 pip install -r requirements-dev.txt
@@ -599,15 +709,13 @@ pytest
 
 ## Formales Datenmodell (models.py)
 
-`Werk` ist eine dataclass mit denselben Feldern wie `database.COLUMN_NAMES`
-(dynamisch daraus erzeugt, keine zweite, unabhängig zu pflegende
-Feldliste). Sie ist bewusst dict-kompatibel (`get`/`[...]`/`update`/...),
-damit sie sich als Drop-in-Ersatz für die bisherigen, einfachen Dicts
-verwenden lässt. Der Speicher-Puffer selbst arbeitet aktuell weiterhin mit
-normalen Dicts – eine vollständige Umstellung darauf wäre ein separater,
-größerer Schritt mit entsprechend höherem Änderungsrisiko und wurde bewusst
-nicht in einem Zug miterledigt. `Werk` steht aber bereits einsatzbereit für
-neuen Code zur Verfügung.
+`Werk` ist eine dataclass mit allen gespeicherten Feldern
+(`database.STORED_COLUMN_NAMES`, also auch den Markierungen `bestellt` und
+`angekommen`; dynamisch daraus erzeugt, keine zweite, unabhängig zu
+pflegende Feldliste). Sie ist bewusst dict-kompatibel
+(`get`/`[...]`/`update`/...), damit sie sich als Drop-in-Ersatz für die
+einfachen Dicts verwenden lässt, mit denen der Zwischenspeicher
+(`library.py`) arbeitet.
 
 ## Hinweis zum Wechsel von Tkinter zu Qt (PySide6)
 

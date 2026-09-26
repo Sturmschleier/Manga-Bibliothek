@@ -178,3 +178,26 @@ def test_replace_database_file_rejects_database_without_library_table(db_env):
     with pytest.raises(ValueError, match="werke"):
         db.replace_database_file(new_file, reason="vor-download")
     assert _titles(db.DB_FILE) == ["Alt"]
+
+
+def test_migration_v3_turns_old_marks_into_next_band_number(tmp_path, monkeypatch):
+    db_file = tmp_path / "manga_library.db"
+    monkeypatch.setattr(db, "DB_FILE", db_file)
+    db.init_db()
+    conn = sqlite3.connect(db_file)
+    conn.executemany(
+        "INSERT INTO werke (titel, baende_bis, bestellt, angekommen) VALUES (?, ?, ?, ?)",
+        [("Bestellt", "11", "1", ""), ("Beides", "4", "1", "1"), ("Ohne", "7", "", ""),
+         ("Keine Zahl", "", "1", "")],
+    )
+    conn.execute("PRAGMA user_version = 2")
+    conn.commit()
+    conn.close()
+
+    db.init_db()
+
+    marks = {e["titel"]: (e["bestellt"], e["angekommen"]) for e in db.load_all()}
+    assert marks == {"Bestellt": ("12", ""), "Beides": ("5", "5"), "Ohne": ("", ""), "Keine Zahl": ("1", "")}
+    conn = sqlite3.connect(db_file)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    conn.close()

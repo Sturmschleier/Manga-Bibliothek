@@ -12,6 +12,7 @@ from PySide6.QtCore import Qt
 
 import database as db
 import sorting
+from logic import parse_int
 
 TYP_OPTIONEN = ["Manga", "Manhwa", "Light Novel"]
 JA_NEIN_OPTIONEN = ["Ja", "Nein"]
@@ -42,7 +43,6 @@ ROW_ID_ROLE = Qt.UserRole + 1
 BAR_COLOR_ROLE = Qt.UserRole + 2  # Farbe des Balkens links in der Zelle (oder None)
 PLUS_BTN_WIDTH = 30
 PLUS_BTN_MARGIN = 4
-MAX_UNDO_STEPS = 50
 
 # Feste Auswahl für den VÖ+1-Filter: bekannte Status-Werte + "Mit Datum"
 # für alles, was ein tatsächlicher Termin (kein Status-Text) ist.
@@ -79,10 +79,9 @@ def _ruckstand_value(entry) -> Optional[int]:
     """Bände (bis) minus Gelesen bis - je kleiner (bzw. negativer), desto
     aktueller ist der Nutzer mit dem Lesen. None, wenn eines der beiden
     Felder keine gültige Zahl enthält."""
-    try:
-        besitz = int((entry.get("baende_bis") or "").strip())
-        gelesen = int((entry.get("gelesen_bis") or "").strip())
-    except ValueError:
+    besitz = parse_int(entry.get("baende_bis"))
+    gelesen = parse_int(entry.get("gelesen_bis"))
+    if besitz is None or gelesen is None:
         return None
     return besitz - gelesen
 
@@ -90,7 +89,7 @@ def _ruckstand_value(entry) -> Optional[int]:
 # Für "Erscheinende Bücher" / "Ausstehend" in der Seitenleiste: alle drei
 # VÖ-Spalten durchsuchen, nicht nur VÖ+1, da auch VÖ+2 und VÖ+3 bereits
 # bekannte künftige Termine enthalten können.
-VOE_COLUMNS = ["voe_1", "voe_2", "voe_3"]
+VOE_COLUMNS = db.VOE_COLUMNS
 
 
 def _entry_voe_dates(entry):

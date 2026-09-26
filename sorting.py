@@ -13,10 +13,12 @@ die Sortierung auch bei gemischten Werten sinnvoll nutzbar.
 import re
 from datetime import date
 
+from database import VOE_COLUMNS
+
 DATE_DMY_RE = re.compile(r"^(\d{1,2})\.(\d{1,2})\.(\d{4})$")   # TT.MM.JJJJ
 DATE_MY_RE = re.compile(r"^(\d{1,2})\.(\d{4})$")                # MM.JJJJ
 
-DATE_COLUMNS = {"voe_1", "voe_2", "voe_3", "zugang"}
+DATE_COLUMNS = set(VOE_COLUMNS) | {"zugang"}
 NUMERIC_COLUMNS = {"baende_bis", "gelesen_bis"}
 
 # Gruppen-Reihenfolge innerhalb einer Spalte: erkannte Werte zuerst

@@ -1,19 +1,20 @@
 """
 config.py
 Zentrale, dauerhafte Konfiguration der Anwendung. Liegt als config.json
-neben der .exe bzw. neben main.py (siehe paths.base_dir()) und wird über
-den Button "⚙ Konfiguration" in der Oberfläche direkt bearbeitbar gemacht.
+neben der .exe bzw. neben main.py (siehe paths.base_dir()) und ist über
+"Konfigurieren → Konfiguration …" direkt bearbeitbar.
 
 Enthält Einstellungen, die über einzelne Programmstarts hinweg erhalten
-bleiben sollen: den bevorzugten Online-Buchhändler und Fallback-Anbieter
-für ISBN-Links, ob die Tabelle nach dem Bearbeiten automatisch zur
-geänderten Zeile springen soll, ob "Gestoppt"-Titel aus Berechnungen
-ausgeschlossen werden, die Farbcodierung je Kategorie, sowie den
-Startanteil der Seitenleiste an der Fensterbreite. Siehe DEFAULTS unten
-für die vollständige, kommentierte Liste.
+bleiben sollen - siehe DEFAULTS unten für die vollständige, kommentierte
+Liste. Die Datei wird sicher geschrieben (erst eine temporäre Datei, dann
+Austausch in einem Schritt); eine beschädigte Datei wird vor dem nächsten
+Schreiben als config.json.defekt aufbewahrt statt überschrieben.
 """
 
+import copy
 import json
+import os
+from typing import Optional
 
 from paths import base_dir
 
@@ -54,10 +55,12 @@ DEFAULTS = {
     # Statistik: Titel mit VÖ +1 = "Gestoppt" aus Summen-/Bilanz-
     # Berechnungen (Statistik-Box, Gesamt/Gelesen/Offen je Typ) ausschließen
     "exclude_gestoppt_from_stats": False,
+    # CSV-Export: Trennzeichen - ";" öffnet sich in Excel mit deutschen
+    # Einstellungen direkt in Spalten ("," landet dort alles in Spalte A)
+    "csv_delimiter": ";",
     # Farbcodierung je Spalten-Kategorie einzeln (de)aktivierbar - auch
-    # direkt über den "🎨 Farben"-Menü-Button in der Werkzeugleiste
-    # erreichbar, nicht nur über diese Datei. Bei deaktivierter Kategorie
-    # wird stattdessen die normale Zebra-Streifung verwendet.
+    # über "Konfigurieren → Farben". Bei deaktivierter Kategorie wird
+    # stattdessen die normale Zebra-Streifung verwendet.
     "colors_enabled": {
         "voe1": True,             # VÖ +1: Beendet/TBA/Gestoppt/NA
         "komplett_beendet": True,  # Komplett/Beendet: Ja/Nein
@@ -68,30 +71,64 @@ DEFAULTS = {
 }
 
 
+# Zulässige Werte für Einstellungen mit fester Auswahl (siehe validate)
+ALLOWED_VALUES = {
+    "isbn_fallback_provider": ("buchhandel.de", "manga-passion"),
+    "mail_imap_security": ("ssl", "starttls"),
+    "csv_delimiter": (";", ",", "\t"),
+}
+
+
+def _read_file():
+    """Liest config.json: (Inhalt oder None, Fehlermeldung oder None).
+    Eine fehlende Datei ist kein Fehler."""
+    if not CONFIG_FILE.exists():
+        return None, None
+    try:
+        with open(CONFIG_FILE, encoding="utf-8") as f:
+            stored = json.load(f)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        return None, f"kein gültiges JSON ({exc})"
+    except OSError as exc:
+        return None, f"nicht lesbar ({exc})"
+    if not isinstance(stored, dict):
+        return None, "kein JSON-Objekt"
+    return stored, None
+
+
+def problem() -> Optional[str]:
+    """Beschreibung, falls config.json existiert, aber unbrauchbar ist -
+    dann gelten die Standardwerte (siehe load). Sonst None."""
+    return _read_file()[1]
+
+
 def load() -> dict:
     """
     Lädt die Konfiguration. Fehlende Schlüssel (z.B. nach einem Update mit
     neuen Einstellungen) werden automatisch mit den Standardwerten ergänzt,
     eine fehlende oder kaputte Datei führt nicht zum Absturz - dann werden
-    einfach die Standardwerte verwendet.
+    einfach die Standardwerte verwendet (siehe problem()).
     """
-    cfg = dict(DEFAULTS)
-    if CONFIG_FILE.exists():
-        try:
-            with open(CONFIG_FILE, encoding="utf-8") as f:
-                stored = json.load(f)
-            if isinstance(stored, dict):
-                cfg.update(stored)
-        except (json.JSONDecodeError, OSError):
-            pass
+    cfg = copy.deepcopy(DEFAULTS)
+    stored, _error = _read_file()
+    if stored:
+        cfg.update(stored)
     return cfg
 
 
 def save(cfg: dict) -> None:
-    """Schreibt die komplette Konfiguration in die Datei."""
+    """Schreibt die komplette Konfiguration in die Datei - erst in eine
+    temporäre Datei, dann Austausch in einem Schritt (os.replace), damit ein
+    Absturz beim Schreiben keine halbe Datei hinterlässt. Eine vorhandene,
+    aber beschädigte config.json wird vorher als config.json.defekt
+    aufbewahrt, statt verloren zu gehen."""
     CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+    if problem():
+        os.replace(CONFIG_FILE, CONFIG_FILE.with_name(CONFIG_FILE.name + ".defekt"))
+    tmp = CONFIG_FILE.with_name(CONFIG_FILE.name + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False, sort_keys=True)
+    os.replace(tmp, CONFIG_FILE)
 
 
 def ensure_file_exists() -> None:
@@ -99,7 +136,42 @@ def ensure_file_exists() -> None:
     existiert - damit der Bearbeiten-Dialog von Anfang an etwas Sinnvolles
     zum Anzeigen/Bearbeiten hat."""
     if not CONFIG_FILE.exists():
-        save(dict(DEFAULTS))
+        save(copy.deepcopy(DEFAULTS))
+
+
+def validate(cfg: dict) -> list[str]:
+    """
+    Prüft die bekannten Einstellungen auf den richtigen Typ und zulässige
+    Werte (unbekannte Schlüssel bleiben erlaubt). Gibt verständliche
+    Fehlermeldungen zurück, leere Liste = in Ordnung.
+    """
+    problems = []
+    type_names = {bool: "true oder false", int: "eine ganze Zahl", float: "eine Zahl", str: "ein Text in Anführungszeichen"}
+    for key, default in DEFAULTS.items():
+        if key not in cfg:
+            continue
+        value = cfg[key]
+        if isinstance(default, dict):
+            if not isinstance(value, dict):
+                problems.append(f"„{key}“ muss ein Objekt {{...}} sein.")
+                continue
+            for sub_key, sub_value in value.items():
+                if sub_key in default and not isinstance(sub_value, type(default[sub_key])):
+                    problems.append(f"„{key}“ → „{sub_key}“ muss {type_names[type(default[sub_key])]} sein.")
+            continue
+        expected = type(default)
+        ok = isinstance(value, expected) and not (expected is not bool and isinstance(value, bool))
+        if expected is float:
+            ok = isinstance(value, (int, float)) and not isinstance(value, bool)
+        if not ok:
+            problems.append(f"„{key}“ muss {type_names[expected]} sein (ist: {json.dumps(value, ensure_ascii=False)}).")
+        elif key in ALLOWED_VALUES and value not in ALLOWED_VALUES[key]:
+            allowed = ", ".join(json.dumps(v) for v in ALLOWED_VALUES[key])
+            problems.append(f"„{key}“ muss einer dieser Werte sein: {allowed}.")
+    template = cfg.get("isbn_shop_url_template")
+    if isinstance(template, str) and "{isbn}" not in template:
+        problems.append("„isbn_shop_url_template“ muss den Platzhalter {isbn} enthalten.")
+    return problems
 
 
 def get(key: str, default=None):
@@ -133,6 +205,24 @@ def get_int(key: str, default: int = None) -> int:
         return int(get(key, default))
     except (TypeError, ValueError, OverflowError):
         return default
+
+
+def get_bool(key: str, default: bool = None) -> bool:
+    """Wie `get()`, aber typsicher für Ja/Nein-Werte: true/false, aber auch
+    von Hand eingetragene Texte wie "false" oder "ja" werden richtig
+    verstanden (der Text "false" wäre in Python sonst wahr). Bei Unsinn
+    gilt der Standardwert."""
+    if default is None:
+        default = bool(DEFAULTS.get(key, False))
+    value = get(key, default)
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().casefold()
+    if text in ("true", "1", "ja", "yes", "an", "on"):
+        return True
+    if text in ("false", "0", "nein", "no", "aus", "off"):
+        return False
+    return default
 
 
 def get_dict(key: str, default: dict = None) -> dict:

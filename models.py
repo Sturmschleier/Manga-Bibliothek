@@ -1,23 +1,16 @@
 """
 models.py
 Formales Datenmodell für einen Bibliothekseintrag: `Werk`, eine dataclass
-mit denselben Feldern wie database.COLUMN_NAMES (+ id), dynamisch aus
-database.COLUMN_NAMES erzeugt - eine zweite, unabhängig zu pflegende
-Feldliste (die mit der Zeit auseinanderdriften könnte) wird damit
-vermieden, ganz wie import_csv.CSV_FIELDS es bereits für den CSV-Import
-macht.
+mit allen gespeicherten Feldern (database.STORED_COLUMN_NAMES, also auch
+den unsichtbaren Markierungen "bestellt"/"angekommen", + id), dynamisch
+daraus erzeugt - eine zweite, unabhängig zu pflegende Feldliste wird damit
+vermieden.
 
 Werk ist bewusst dict-kompatibel (get/__getitem__/__setitem__/keys/items/
-update): der komplette Speicher-Puffer in gui.py, logic.py und
-isbn_lookup.py arbeitet aktuell mit einfachen Dicts (`entry.get("titel")`,
-`entry["baende_bis"] = ...` usw.) an hunderten Stellen. Werk lässt sich
-darum schon jetzt als Drop-in-Ersatz für ein solches Dict verwenden, ohne
-dass jede einzelne Stelle sofort umgeschrieben werden müsste - eine
-vollständige Umstellung des Puffers von dict auf Werk ist eine separate,
-größere Aufgabe mit entsprechend höherem Änderungsumfang und wurde bewusst
-NICHT in einem Zug mit dieser Vorbereitung erledigt (Risiko einer
-Destabilisierung des aktuell fehlerfrei laufenden Programms). Neuer Code
-kann Werk schon heute direkt verwenden, z.B.:
+update): der Speicher-Puffer (library.py) und die Logik-Module arbeiten mit
+einfachen Dicts (`entry.get("titel")`, `entry["baende_bis"] = ...`). Werk
+lässt sich darum als Drop-in-Ersatz für ein solches Dict verwenden. Neuer
+Code kann Werk direkt verwenden, z.B.:
 
     werk = Werk.from_dict(row_dict)
     werk.baende_bis  # statt werk["baende_bis"] oder werk.get("baende_bis")
@@ -77,16 +70,18 @@ class _DictLikeMixin:
         return cls(**{k: v for k, v in (data or {}).items() if k in known})
 
 
-# Felder dynamisch aus database.COLUMN_NAMES erzeugen (Reihenfolge: id
-# zuerst, dann die regulären Spalten in derselben Reihenfolge wie in der
-# Datenbank/GUI) - einzige Quelle der Wahrheit bleibt database.py.
+# Felder dynamisch aus database.STORED_COLUMN_NAMES erzeugen (Reihenfolge:
+# id zuerst, dann die gespeicherten Spalten in derselben Reihenfolge wie in
+# der Datenbank) - einzige Quelle der Wahrheit bleibt database.py. Auch die
+# unsichtbaren Felder gehören dazu, sonst gingen die Bestellt-/Angekommen-
+# Markierungen bei Werk.from_dict(...).to_dict() still verloren.
 _FIELDS = [("id", Optional[int], field(default=None))] + [
-    (col, str, field(default="")) for col in db.COLUMN_NAMES
+    (col, str, field(default="")) for col in db.STORED_COLUMN_NAMES
 ]
 
 Werk = make_dataclass("Werk", _FIELDS, bases=(_DictLikeMixin,))
 Werk.__doc__ = (
     "Ein einzelner Bibliothekseintrag - Felder entsprechen 1:1 "
-    "database.COLUMN_NAMES (+ id). Dict-kompatibel, siehe models.py-Modul-"
-    "Docstring."
+    "database.STORED_COLUMN_NAMES (+ id). Dict-kompatibel, siehe "
+    "models.py-Modul-Docstring."
 )
