@@ -48,6 +48,19 @@ COLUMNS = [
 
 COLUMN_NAMES = [c[0] for c in COLUMNS]
 
+# Zusätzlich gespeicherte, aber NICHT sichtbare Felder: gehören zum
+# Eintrag (Puffer, Undo, Speichern), erscheinen aber weder als Tabellen-
+# spalte noch im Bearbeiten-Formular oder im CSV-Export/-Import.
+#   bestellt = "1", wenn der nächste Band laut Bestellbestätigung
+#              (E-Mail-Import, siehe order_mail.py) bestellt wurde - wird in
+#              der Tabelle hellblau am Titel markiert und beim "+1" auf
+#              "Bände (bis)" wieder zurückgesetzt.
+HIDDEN_COLUMNS = [
+    ("bestellt", "TEXT"),
+]
+STORED_COLUMNS = COLUMNS + HIDDEN_COLUMNS
+STORED_COLUMN_NAMES = [c[0] for c in STORED_COLUMNS]
+
 # Sprechende Beschriftungen für die GUI
 LABELS = {
     "titel": "Titel",
@@ -98,7 +111,7 @@ def _apply_migrations(conn, current_version: int) -> None:
 
 def init_db():
     conn = get_connection()
-    cols_sql = ",\n".join(f"{name} {ctype}" for name, ctype in COLUMNS)
+    cols_sql = ",\n".join(f"{name} {ctype}" for name, ctype in STORED_COLUMNS)
     conn.execute(
         f"""
         CREATE TABLE IF NOT EXISTS werke (
@@ -117,7 +130,7 @@ def init_db():
     # Datenmodells/Puffers, da sie sich mit jedem Band ändert und beim
     # Speichern nicht dauerhaft mitgeführt werden muss.)
     existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(werke)").fetchall()}
-    for name, ctype in COLUMNS:
+    for name, ctype in STORED_COLUMNS:
         if name not in existing_cols:
             conn.execute(f"ALTER TABLE werke ADD COLUMN {name} {ctype}")
     conn.commit()
@@ -152,12 +165,12 @@ def replace_all(entries):
     """
     conn = get_connection()
     conn.execute("DELETE FROM werke")
-    cols = ", ".join(COLUMN_NAMES)
-    placeholders = ", ".join("?" for _ in COLUMN_NAMES)
+    cols = ", ".join(STORED_COLUMN_NAMES)
+    placeholders = ", ".join("?" for _ in STORED_COLUMN_NAMES)
     for entry in entries:
         conn.execute(
             f"INSERT INTO werke ({cols}) VALUES ({placeholders})",
-            [entry.get(c, "") or "" for c in COLUMN_NAMES],
+            [entry.get(c, "") or "" for c in STORED_COLUMN_NAMES],
         )
     conn.commit()
     conn.close()

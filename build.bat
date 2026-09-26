@@ -14,6 +14,7 @@ python -m PyInstaller --noconfirm --onefile --windowed --name "MangaLibrary" ^
     --collect-all google_auth_oauthlib ^
     --collect-all google_auth_httplib2 ^
     --hidden-import googleapiclient.discovery_cache.file ^
+    --hidden-import keyring.backends.Windows ^
     main.py
 
 echo.

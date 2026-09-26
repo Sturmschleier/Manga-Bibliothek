@@ -76,6 +76,8 @@ class MangaTableModel(QAbstractTableModel):
         if role == Qt.DisplayRole:
             return entry.get(col, "") or ""
         if role == Qt.BackgroundRole:
+            if col == "titel" and entry.get("bestellt"):
+                return QColor(colors.BESTELLT_COLOR)
             return QColor(colors.cell_background(col, entry.get(col, "") or "", index.row(), self.colors_enabled))
         if role == Qt.ForegroundRole:
             return QColor(colors.DEFAULT_TEXT_COLOR)

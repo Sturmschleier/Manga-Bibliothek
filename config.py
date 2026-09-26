@@ -26,6 +26,18 @@ DEFAULTS = {
     # Fallback-Suche, wenn keine ISBN automatisch gefunden wurde:
     # "buchhandel.de" (Standard) oder "manga-passion"
     "isbn_fallback_provider": "buchhandel.de",
+    # Postfach-Abruf von Bestellbestätigungen (IMAP, siehe mail_fetch.py).
+    # Das Passwort steht bewusst NICHT hier, sondern (optional) in den
+    # Windows-Anmeldeinformationen bzw. wird bei Bedarf abgefragt.
+    "mail_imap_host": "",
+    "mail_imap_port": 993,
+    "mail_imap_security": "ssl",       # "ssl" (Port 993) oder "starttls" (Port 143)
+    "mail_imap_user": "",
+    "mail_folder": "INBOX",
+    "mail_filter_sender": "konold",    # Absender enthält (leer = egal)
+    "mail_filter_subject": "Bestellung",  # Betreff enthält (leer = egal)
+    "mail_days_back": 90,
+    "mail_max_messages": 30,
     # Oberfläche
     "follow_selection_after_edit": True,
     "sidebar_width_fraction": 0.15,

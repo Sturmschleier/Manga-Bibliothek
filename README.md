@@ -225,6 +225,69 @@ des gespeicherten Datenmodells. Ebenso werden „VÖ +4“ und „VÖ +5“ igno
 14 Spalten, auch die ursprüngliche `Manga - Besitz.csv`, lassen sich also
 weiterhin importieren; die Inhalte dieser beiden Spalten werden verworfen.
 
+## Bestellung aus E-Mail einlesen
+
+Es gibt drei Wege, die Bestellbestätigung ins Programm zu bekommen:
+
+1. **Datei → Bestellung aus E-Mail (.eml) einlesen …** – eine oder mehrere
+   `.eml`-Dateien auswählen.
+2. **Drag & Drop** – `.eml`-Dateien (z. B. direkt aus Thunderbird oder
+   dem Explorer) einfach auf das Programmfenster ziehen; mehrere Dateien
+   auf einmal sind möglich.
+3. **Datei → Bestellungen aus Postfach abrufen …** – holt die Mails direkt
+   aus dem E-Mail-Postfach, siehe Abschnitt „Postfach-Abruf“ unten.
+
+Das Programm liest die Artikelliste (Name, Anzahl, Preis) und ordnet jeden Artikel einem
+Eintrag zu: Der Artikelname muss mit dem Titel beginnen, danach folgt die
+Bandnummer („Sanda - Band 12“, „Fabiniku 14“). Steht noch ein Zusatz
+zwischen Titel und Nummer („Togen Anki - Teufelsblut 23“), zählt der Treffer
+nur, wenn die Nummer genau „Bände (bis)“ + 1 ist. Ist der bestellte Band
+nicht größer als „Bände (bis)“, gilt er als schon vorhanden und wird nicht
+markiert.
+
+- Zugeordnete Titel werden in der Tabelle **hellblau am Titel** markiert
+  (Legende unten: „Titel bestellt“). Nach dem Einlesen zeigt ein Fenster,
+  wie viele Titel markiert wurden und – unter „Details“ – welche Artikel
+  keinem Eintrag zugeordnet werden konnten oder schon im Bestand sind.
+- Klickt man bei „Bände (bis)“ auf **+1**, verschwindet die Markierung
+  dieses Titels. Von Hand entfernen geht per Rechtsklick auf die Zeile →
+  „Bestellt-Markierung entfernen“.
+- Die Markierung ist ein normaler Teil des Eintrags: sie wirkt auf
+  Rückgängig/Wiederholen, wird erst mit „💾 Speichern“ dauerhaft und steht
+  in der Datenbank (Feld `bestellt`), aber nicht im CSV-Export.
+- **Die E-Mail selbst wird nicht gespeichert.** Sie wird nur gelesen und im
+  Speicher ausgewertet; weder Adresse noch Bestellnummer noch Preise werden
+  übernommen. Im Live-Log/Änderungsprotokoll landen nur die markierten Titel.
+
+### Postfach-Abruf (IMAP)
+
+**Konfigurieren → Postfach (IMAP) …** richtet den Zugang ein – unabhängig
+vom Anbieter, es genügt ein IMAP-Server. Vorlagen (GMX, WEB.DE, Gmail,
+Yahoo, iCloud, T-Online, IONOS, Posteo, mailbox.org) füllen Server, Port und
+Verschlüsselung nur vor; jeder andere Server lässt sich frei eintragen.
+Mit **„Verbindung testen“** prüfst du Server, Anmeldung und Ordner.
+
+- **Filter:** Ordner (Standard `INBOX`), „Absender enthält“ (Standard
+  `konold`), „Betreff enthält“ (Standard `Bestellung`), Zeitraum (Standard
+  90 Tage) und maximale Mailanzahl je Abruf.
+- **Abruf:** *Datei → Bestellungen aus Postfach abrufen …* sucht passende
+  Mails, zeigt sie zur Auswahl (Datum, Betreff, Artikelzahl) und markiert
+  danach wie beim .eml-Import. Mails ohne Artikelliste (z. B.
+  Versandmitteilungen) werden übersprungen. Ein erneuter Abruf ist
+  ungefährlich: bereits gelieferte Bände werden nicht erneut markiert.
+- **Passwort:** steht **nie** in `config.json`. Wahlweise wird es in den
+  Windows-Anmeldeinformationen gespeichert (Paket `keyring`), sonst wird es
+  beim Abruf abgefragt und nur bis zum Programmende im Arbeitsspeicher
+  gehalten. Bei GMX, WEB.DE, Gmail u. ä. muss der IMAP-Zugriff in den
+  Kontoeinstellungen erlaubt sein, teils ist ein App-Passwort nötig.
+  Anbieter, die nur OAuth2 zulassen (z. B. Outlook.com), funktionieren so
+  nicht.
+- **Nur lesend:** Der Ordner wird schreibgeschützt geöffnet, die Mails
+  werden ohne „gelesen“-Markierung geladen; im Postfach wird nichts
+  verändert oder gelöscht. Die Verbindung ist verschlüsselt (SSL/TLS oder
+  STARTTLS, mit Zertifikatsprüfung). Wie beim Datei-Import werden die
+  Mails nicht gespeichert.
+
 ## Bestand als CSV exportieren
 
 Menü **Datei → CSV exportieren …** → Speicherort wählen. Exportiert wird der
@@ -440,6 +503,8 @@ mangalib/
 ├── paths.py            Basisverzeichnis - funktioniert auch als gebündelte exe
 ├── drive_sync.py        Google-Drive-Sicherung/-Wiederherstellung
 ├── import_csv.py       CSV-Einlesen (liefert Daten für den Puffer)
+├── order_mail.py       Bestell-E-Mail (.eml) lesen, Artikel den Einträgen zuordnen
+├── mail_fetch.py       IMAP-Abruf von Bestellbestätigungen (anbieterunabhängig)
 ├── tests/               Automatisierte Tests (pytest) für die reinen Logik-Module
 ├── build.bat            PyInstaller-Buildskript (Windows) für die exe
 ├── requirements.txt    Python-Laufzeit-Abhängigkeiten

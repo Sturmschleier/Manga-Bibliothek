@@ -16,6 +16,7 @@ Aufwand ("virtualisiert") - unabhängig von der Gesamtgröße der Sammlung.
 """
 
 import copy
+import os
 import threading
 from datetime import date
 
@@ -24,7 +25,7 @@ from PySide6.QtGui import QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QComboBox, QFileDialog, QFrame,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QMainWindow, QMenu,
-    QMessageBox, QPlainTextEdit, QProgressDialog, QPushButton, QSizePolicy,
+    QInputDialog, QMessageBox, QPlainTextEdit, QProgressDialog, QPushButton, QSizePolicy,
     QSplitter, QTableView, QVBoxLayout, QWidget,
 )
 
@@ -35,6 +36,8 @@ import csv_export
 import database as db
 import import_csv
 import logic
+import mail_fetch
+import order_mail
 import sorting
 
 from .constants import (
@@ -44,6 +47,7 @@ from .constants import (
 )
 from .dialogs import ConfigDialog, EntryDialog, IsbnLookupDialog
 from .isbn_view import IsbnResultWindow, IsbnWorkerSignals
+from .mail_dialogs import AsyncCall, MailSelectDialog, MailSettingsDialog
 from .table import CellDelegate, MangaTableModel
 
 class MangaLibraryApp(QMainWindow):
@@ -69,6 +73,9 @@ class MangaLibraryApp(QMainWindow):
         self.sort_column = "titel"
         self.sort_reverse = False
         self.selected_row_id = None
+        self._mail_session_passwords = {}  # nur im Arbeitsspeicher, nie auf Platte
+        self._mail_call = None
+        self.setAcceptDrops(True)  # .eml-Dateien per Drag & Drop einlesen
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -287,6 +294,20 @@ class MangaLibraryApp(QMainWindow):
         export_action = file_menu.addAction("CSV exportieren …")
         export_action.triggered.connect(self.export_csv_dialog)
 
+        order_action = file_menu.addAction("Bestellung aus E-Mail (.eml) einlesen …")
+        order_action.setToolTip(
+            "Liest eine Bestellbestätigung (.eml) und markiert die bestellten Titel hellblau. "
+            "Die E-Mail selbst wird nicht gespeichert."
+        )
+        order_action.triggered.connect(self.import_order_mail_dialog)
+
+        mailbox_action = file_menu.addAction("Bestellungen aus Postfach abrufen …")
+        mailbox_action.setToolTip(
+            "Ruft Bestellbestätigungen per IMAP direkt aus dem E-Mail-Postfach ab "
+            "(Zugang unter Konfigurieren → Postfach). Es wird nichts im Postfach verändert."
+        )
+        mailbox_action.triggered.connect(self.fetch_orders_from_mailbox)
+
         file_menu.addSeparator()
 
         download_action = file_menu.addAction("Von Google Drive laden")
@@ -299,6 +320,10 @@ class MangaLibraryApp(QMainWindow):
         config_action = config_menu.addAction("Konfiguration …")
         config_action.setToolTip("Zentrale Konfigurationsdatei (config.json) bearbeiten")
         config_action.triggered.connect(self.open_config_dialog)
+
+        mail_settings_action = config_menu.addAction("Postfach (IMAP) …")
+        mail_settings_action.setToolTip("Zugang und Suchfilter für den Abruf von Bestellbestätigungen")
+        mail_settings_action.triggered.connect(self.open_mail_settings_dialog)
 
         config_menu.addSeparator()
 
@@ -505,6 +530,10 @@ class MangaLibraryApp(QMainWindow):
 
         row.addSpacing(12)
         row.addWidget(QLabel("Verlag: automatische Farbe je Verlag"))
+
+        row.addSpacing(12)
+        row.addWidget(self._swatch(colors.BESTELLT_COLOR))
+        row.addWidget(QLabel("Titel bestellt"))
 
         self.statusBar().addPermanentWidget(legend)
 
@@ -887,10 +916,26 @@ class MangaLibraryApp(QMainWindow):
 
         menu = QMenu(self.view)
         menu.addAction("Bei buchhandel.de suchen", self.search_selected_on_buchhandel)
+        entry = self._find_entry(self._selected_id())
+        if entry is not None and entry.get("bestellt"):
+            menu.addAction("Bestellt-Markierung entfernen", self.clear_ordered_mark)
         menu.addSeparator()
         menu.addAction("Bearbeiten", self.edit_selected)
         menu.addAction("Löschen", self.delete_selected)
         menu.exec(self.view.viewport().mapToGlobal(pos))
+
+    def clear_ordered_mark(self):
+        """Entfernt die hellblaue "bestellt"-Markierung des markierten
+        Eintrags von Hand (z. B. bei einer Fehlzuordnung oder Stornierung)."""
+        entry = self._find_entry(self._selected_id())
+        if entry is None or not entry.get("bestellt"):
+            return
+        self._push_undo_snapshot()
+        entry["bestellt"] = ""
+        self._mark_dirty()
+        self._commit_pending_action()
+        self.refresh()
+        self._log(f"Bestellt-Markierung entfernt: „{entry.get('titel')}“.")
 
     def search_selected_on_buchhandel(self):
         """Öffnet im Standardbrowser die buchhandel.de-Suche für den
@@ -974,6 +1019,7 @@ class MangaLibraryApp(QMainWindow):
             self._discard_pending_snapshot()
             QMessageBox.warning(self, "Hinweis", "„Bände (bis)“ enthält keine gültige Zahl.")
             return
+        entry["bestellt"] = ""  # der bestellte Band ist angekommen -> Markierung entfällt
         self.selected_row_id = row_id
         self._mark_dirty()
         self._commit_pending_action()
@@ -1047,6 +1093,174 @@ class MangaLibraryApp(QMainWindow):
         if warnings:
             message += "\n\n" + "\n".join(warnings)
         QMessageBox.information(self, "Import", message)
+
+    def import_order_mail_dialog(self):
+        """Datei-Auswahl (auch mehrere .eml auf einmal) für Bestellbestätigungen."""
+        paths, _filter = QFileDialog.getOpenFileNames(
+            self, "Bestellbestätigung(en) (E-Mail) auswählen", "", "E-Mail (*.eml)"
+        )
+        if paths:
+            self._import_order_files(paths)
+
+    def _import_order_files(self, paths):
+        """Liest die angegebenen .eml-Dateien (Dialog oder Drag & Drop) ein.
+        Die Dateien werden nur gelesen, nichts davon wird abgelegt."""
+        items, problems = [], []
+        for path in paths:
+            try:
+                items += order_mail.parse_eml(path)
+            except (ValueError, OSError) as exc:
+                problems.append(f"{os.path.basename(path)}: {exc}")
+        if not items:
+            QMessageBox.critical(
+                self, "Bestellung einlesen",
+                "Aus den gewählten Dateien konnte keine Bestellung gelesen werden:\n\n" + "\n".join(problems),
+            )
+            return
+        self._apply_order_items(items, len(paths) - len(problems), problems)
+
+    def _apply_order_items(self, items, mail_count, problems=()):
+        """Ordnet die bestellten Artikel den Einträgen zu und markiert diese
+        (Feld "bestellt", hellblau in der Tabelle). Gemeinsamer Weg für
+        .eml-Dateien und den Postfach-Abruf. Ins Log geht nur, welche Titel
+        markiert wurden - nichts aus den E-Mails selbst."""
+        matches, already_owned, unmatched = order_mail.match_items(items, self.data)
+        new_matches = [m for m in matches if not m.entry.get("bestellt")]
+
+        if new_matches:
+            self._push_undo_snapshot()
+            for m in new_matches:
+                m.entry["bestellt"] = "1"
+            self._mark_dirty()
+            self._commit_pending_action()
+            self.refresh()
+            self._log(
+                f"Bestellung eingelesen: {len(new_matches)} Titel markiert ("
+                + ", ".join(f"{m.entry.get('titel')} Bd. {m.band}" for m in new_matches) + ")."
+            )
+
+        lines = [f"{mail_count} E-Mail(s), {len(items)} Artikel, {len(matches)} Titel zugeordnet."]
+        if new_matches:
+            lines.append(f"{len(new_matches)} neu hellblau markiert – noch nicht gespeichert (💾 Speichern).")
+        if len(matches) > len(new_matches):
+            lines.append(f"{len(matches) - len(new_matches)} waren bereits markiert.")
+        if already_owned:
+            lines.append(f"{len(already_owned)} Band/Bände waren schon im Bestand.")
+        if unmatched:
+            lines.append(f"{len(unmatched)} Artikel ohne passenden Eintrag (z. B. Sonderausgaben).")
+        if problems:
+            lines.append(f"{len(problems)} Datei(en) nicht lesbar.")
+
+        details = []
+        if already_owned:
+            details.append("Bereits im Bestand (nicht markiert):")
+            details += [f"  {m.entry.get('titel')} – Band {m.band}" for m in already_owned]
+            details.append("")
+        if unmatched:
+            details.append("Keinem Eintrag zugeordnet:")
+            details += [f"  {item.name}" for item in unmatched]
+            details.append("")
+        if problems:
+            details.append("Nicht lesbar:")
+            details += [f"  {p}" for p in problems]
+
+        box = QMessageBox(QMessageBox.Information, "Bestellung einlesen", "\n".join(lines), QMessageBox.Ok, self)
+        if details:
+            box.setDetailedText("\n".join(details).strip())
+        box.exec()
+
+    # -- Postfach (IMAP)
+
+    def open_mail_settings_dialog(self):
+        MailSettingsDialog(self).exec()
+
+    def fetch_orders_from_mailbox(self):
+        """Ruft Bestellbestätigungen per IMAP ab (Hintergrund-Thread), lässt
+        die gefundenen Mails auswählen und markiert die bestellten Titel."""
+        settings = mail_fetch.load_settings()
+        if not settings.configured:
+            QMessageBox.information(
+                self, "Postfach",
+                "Der Postfach-Zugang ist noch nicht eingerichtet.\n\n"
+                "Bitte unter „Konfigurieren → Postfach (IMAP) …“ Server und Benutzername eintragen.",
+            )
+            return
+
+        password = (
+            self._mail_session_passwords.get(settings.credential_key)
+            or mail_fetch.get_saved_password(settings)
+        )
+        if not password:
+            password, ok = QInputDialog.getText(
+                self, "Postfach", f"Passwort für {settings.user}\n({settings.host}):", QLineEdit.Password
+            )
+            if not ok or not password:
+                return
+        self._mail_session_passwords[settings.credential_key] = password  # nur im Arbeitsspeicher
+
+        progress = QProgressDialog("Rufe Bestellbestätigungen aus dem Postfach ab …", None, 0, 0, self)
+        progress.setWindowTitle("Postfach")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setCancelButton(None)
+        progress.setMinimumDuration(0)
+        progress.show()
+
+        call = AsyncCall(lambda: mail_fetch.fetch_orders(settings, password), self)
+        call.finished.connect(lambda mails, error: self._finish_mailbox_fetch(progress, settings, mails, error))
+        self._mail_call = call  # Referenz halten, bis das Ergebnis da ist
+        call.start()
+
+    def _finish_mailbox_fetch(self, progress, settings, mails, error):
+        progress.close()
+        self._mail_call = None
+        if error is not None:
+            self._mail_session_passwords.pop(settings.credential_key, None)  # evtl. falsches Passwort verwerfen
+            QMessageBox.critical(self, "Postfach", str(error))
+            return
+        if not mails:
+            QMessageBox.information(
+                self, "Postfach",
+                f"Keine passenden Mails gefunden (Ordner „{settings.folder}“, letzte {settings.days_back} Tage, "
+                f"Absender „{settings.sender or 'egal'}“, Betreff „{settings.subject or 'egal'}“).\n\n"
+                "Filter unter „Konfigurieren → Postfach (IMAP) …“ anpassbar.",
+            )
+            return
+        if not any(m.items for m in mails):
+            QMessageBox.information(
+                self, "Postfach",
+                f"{len(mails)} Mail(s) gefunden, aber keine enthält eine auswertbare Artikelliste.",
+            )
+            return
+        dlg = MailSelectDialog(self, mails)
+        if not dlg.exec():
+            return
+        chosen = dlg.selected_mails()
+        if not chosen:
+            return
+        self._apply_order_items([item for m in chosen for item in m.items], len(chosen))
+
+    # -- Drag & Drop von .eml-Dateien auf das Fenster
+
+    @staticmethod
+    def _dropped_eml_paths(mime):
+        if not mime.hasUrls():
+            return []
+        paths = [u.toLocalFile() for u in mime.urls() if u.isLocalFile()]
+        return [p for p in paths if p.lower().endswith(".eml")]
+
+    def dragEnterEvent(self, event):
+        if self._dropped_eml_paths(event.mimeData()):
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dropEvent(self, event):
+        paths = self._dropped_eml_paths(event.mimeData())
+        if paths:
+            event.acceptProposedAction()
+            self._import_order_files(paths)
+        else:
+            super().dropEvent(event)
 
     def export_csv_dialog(self):
         path, _filter = QFileDialog.getSaveFileName(
