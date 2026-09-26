@@ -18,11 +18,16 @@ DB_FILE = base_dir() / "manga_library.db"
 # einzelner Integer, direkt im Datenbank-Header gespeichert - kein
 # zusätzliches Tabellen-Setup nötig). Ergänzt die bisherige Spalten-
 # Migration (ALTER TABLE ADD COLUMN, siehe init_db) um einen Ort für
-# künftige STRUKTURELLE Änderungen (z.B. eine Tabelle aufteilen, einen
-# Fremdschlüssel ergänzen), die sich nicht mehr mit einem einfachen
-# "fehlende Spalte ergänzen" abbilden lassen. Aktuell gibt es nur Version 1
-# (Ausgangszustand) - siehe _apply_migrations().
-SCHEMA_VERSION = 1
+# STRUKTURELLE Änderungen (z.B. Spalten entfernen, eine Tabelle aufteilen),
+# die sich nicht mehr mit einem einfachen "fehlende Spalte ergänzen"
+# abbilden lassen - siehe _apply_migrations().
+#   1 = Ausgangszustand (mit VÖ +4 / VÖ +5)
+#   2 = Spalten voe_4 und voe_5 entfernt
+SCHEMA_VERSION = 2
+
+# Seit Schema-Version 2 nicht mehr Teil des Datenmodells; werden bei
+# bestehenden Datenbanken in _apply_migrations() entfernt.
+_REMOVED_COLUMNS_V2 = ("voe_4", "voe_5")
 
 # Spalten exakt wie in der ursprünglichen CSV (nur intern umbenannt, da
 # "bis" u.ä. keine sprechenden Namen sind).
@@ -39,8 +44,6 @@ COLUMNS = [
     ("voe_1", "TEXT"),
     ("voe_2", "TEXT"),
     ("voe_3", "TEXT"),
-    ("voe_4", "TEXT"),
-    ("voe_5", "TEXT"),
 ]
 
 COLUMN_NAMES = [c[0] for c in COLUMNS]
@@ -59,8 +62,6 @@ LABELS = {
     "voe_1": "VÖ +1",
     "voe_2": "VÖ +2",
     "voe_3": "VÖ +3",
-    "voe_4": "VÖ +4",
-    "voe_5": "VÖ +5",
 }
 
 
@@ -73,14 +74,26 @@ def get_connection():
 def _apply_migrations(conn, current_version: int) -> None:
     """
     Führt alle noch ausstehenden strukturellen Schema-Migrationen aus
-    (Versionen zwischen `current_version` und SCHEMA_VERSION). Aktuell gibt
-    es nur Version 1 (Ausgangszustand), es ist also noch nichts
-    nachzuholen - der Rahmen steht bereit für künftige strukturelle
-    Änderungen, die über eine einfache Spalten-Ergänzung hinausgehen, z.B.:
+    (Versionen zwischen `current_version` und SCHEMA_VERSION).
 
-        if current_version < 2:
-            conn.execute("...")
+    Version 2: entfernt die Spalten voe_4 und voe_5 (VÖ +4 / VÖ +5). Da
+    dabei eventuell vorhandene Inhalte dieser Spalten endgültig verloren
+    gehen, wird vorher - nur wenn die Spalten tatsächlich noch existieren -
+    eine Sicherungskopie der Datenbank neben der Datenbankdatei angelegt.
     """
+    if current_version < 2:
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(werke)").fetchall()}
+        to_drop = [c for c in _REMOVED_COLUMNS_V2 if c in existing]
+        if to_drop:
+            backup_path = DB_FILE.with_name(DB_FILE.name + ".vor-schema-v2.bak")
+            backup = sqlite3.connect(backup_path)
+            try:
+                conn.backup(backup)
+            finally:
+                backup.close()
+            for col in to_drop:
+                conn.execute(f"ALTER TABLE werke DROP COLUMN {col}")
+            conn.commit()
 
 
 def init_db():

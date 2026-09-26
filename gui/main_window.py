@@ -19,11 +19,11 @@ import copy
 import threading
 from datetime import date
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QKeySequence
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QComboBox, QFileDialog, QFrame,
-    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QMainWindow,
+    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QMainWindow, QMenu,
     QMessageBox, QPlainTextEdit, QProgressDialog, QPushButton, QSizePolicy,
     QSplitter, QTableView, QVBoxLayout, QWidget,
 )
@@ -271,6 +271,13 @@ class MangaLibraryApp(QMainWindow):
 
         delete_action = file_menu.addAction("Löschen")
         delete_action.triggered.connect(self.delete_selected)
+
+        file_menu.addSeparator()
+
+        search_action = file_menu.addAction("Bei buchhandel.de suchen")
+        search_action.setShortcut(QKeySequence("Ctrl+B"))
+        search_action.setToolTip("Den markierten Titel direkt auf buchhandel.de suchen (öffnet den Browser)")
+        search_action.triggered.connect(self.search_selected_on_buchhandel)
 
         file_menu.addSeparator()
 
@@ -669,7 +676,7 @@ class MangaLibraryApp(QMainWindow):
         self.overdue_count_lbl = self._stat_field(box_layout, "Vor aktuellem Monat:")
 
         box.setToolTip(
-            "Zählt Termine (Treffer über alle fünf VÖ-Spalten VÖ +1 … VÖ +5), nicht "
+            "Zählt Termine (Treffer über alle drei VÖ-Spalten VÖ +1 … VÖ +3), nicht "
             "eindeutige Titel - ein Titel mit zwei Terminen im selben Zeitraum zählt "
             "also zweimal.\n"
             "„Ausstehende Termine“ = vermutlich bereits erschienen, aber „Bände (bis)“ "
@@ -739,6 +746,8 @@ class MangaLibraryApp(QMainWindow):
         self.view.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self.view.horizontalHeader().sectionClicked.connect(self._sort_by_index)
         self.view.doubleClicked.connect(self._on_double_clicked)
+        self.view.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.view.customContextMenuRequested.connect(self._show_table_context_menu)
         self.view.selectionModel().selectionChanged.connect(self._on_selection_changed)
 
         for col_idx, col in enumerate(DISPLAY_COLUMNS):
@@ -867,6 +876,47 @@ class MangaLibraryApp(QMainWindow):
             verlag_values=self._distinct_values("verlag"),
         )
         dlg.exec()
+
+    def _show_table_context_menu(self, pos):
+        """Rechtsklick auf eine Tabellenzeile: markiert die Zeile unter dem
+        Mauszeiger und bietet die Aktionen für genau diesen Eintrag an."""
+        index = self.view.indexAt(pos)
+        if not index.isValid():
+            return
+        self.view.selectRow(index.row())
+
+        menu = QMenu(self.view)
+        menu.addAction("Bei buchhandel.de suchen", self.search_selected_on_buchhandel)
+        menu.addSeparator()
+        menu.addAction("Bearbeiten", self.edit_selected)
+        menu.addAction("Löschen", self.delete_selected)
+        menu.exec(self.view.viewport().mapToGlobal(pos))
+
+    def search_selected_on_buchhandel(self):
+        """Öffnet im Standardbrowser die buchhandel.de-Suche für den
+        markierten Titel - unabhängig vom konfigurierten Fallback-Anbieter
+        des ISBN-Abgleichs, direkt aus der Tabelle heraus."""
+        row_id = self._selected_id()
+        if row_id is None:
+            QMessageBox.information(self, "Hinweis", "Bitte zuerst einen Eintrag auswählen.")
+            return
+        entry = self._find_entry(row_id)
+        titel = (entry.get("titel") or "").strip() if entry else ""
+        if not titel:
+            return
+        try:
+            import isbn_lookup
+        except ImportError:
+            QMessageBox.critical(
+                self, "buchhandel.de",
+                "Das Paket „requests“ wird dafür benötigt.\n\nBitte installieren mit:\npip install requests",
+            )
+            return
+        url = isbn_lookup.buchhandel_de_search_url(titel)
+        if not QDesktopServices.openUrl(QUrl(url)):
+            QMessageBox.warning(self, "buchhandel.de", f"Der Browser konnte nicht geöffnet werden:\n\n{url}")
+            return
+        self.statusBar().showMessage(f"buchhandel.de: Suche nach „{titel}“ geöffnet.", 5000)
 
     def delete_selected(self):
         row_id = self._selected_id()
@@ -1048,6 +1098,7 @@ class MangaLibraryApp(QMainWindow):
             self.statusBar().showMessage("Lade von Google Drive ...")
             QApplication.processEvents()
             drive_sync.download()
+            db.init_db()  # ältere Sicherung -> Schema ggf. auf den aktuellen Stand migrieren
             self.data = db.load_all()
             self._clean_snapshot = copy.deepcopy(self.data)
             self.dirty = False

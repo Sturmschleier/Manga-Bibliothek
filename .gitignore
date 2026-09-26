@@ -15,3 +15,11 @@ token.json
 manga_library.db
 config.json
 LOG/
+
+manga_library.db.*
+
+# Lokales Build-Skript (verschiebt die exe nach ..\Work)
+Build_work.bat
+
+# Persönliche Sammlungsliste (CSV)
+Manga - Besitz.csv

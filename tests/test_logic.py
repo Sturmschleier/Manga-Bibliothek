@@ -10,7 +10,7 @@ import logic
 # --------------------------------------------------------------- increment_baende
 
 def test_increment_baende_shifts_voe_columns_forward():
-    entry = {"baende_bis": "5", "voe_1": "TBA", "voe_2": "15.09.2026", "voe_3": "", "voe_4": "", "voe_5": ""}
+    entry = {"baende_bis": "5", "voe_1": "TBA", "voe_2": "15.09.2026", "voe_3": ""}
     result = logic.increment_baende(entry)
     assert result == 6
     assert entry["baende_bis"] == "6"
@@ -18,19 +18,14 @@ def test_increment_baende_shifts_voe_columns_forward():
     assert entry["voe_2"] == ""
 
 
-def test_increment_baende_shifts_all_five_columns():
-    entry = {
-        "baende_bis": "1",
-        "voe_1": "a", "voe_2": "b", "voe_3": "c", "voe_4": "d", "voe_5": "e",
-    }
+def test_increment_baende_shifts_all_three_columns():
+    entry = {"baende_bis": "1", "voe_1": "a", "voe_2": "b", "voe_3": "c"}
     logic.increment_baende(entry)
-    assert (entry["voe_1"], entry["voe_2"], entry["voe_3"], entry["voe_4"], entry["voe_5"]) == (
-        "b", "c", "d", "e", "",
-    )
+    assert (entry["voe_1"], entry["voe_2"], entry["voe_3"]) == ("b", "c", "")
 
 
 def test_increment_baende_sets_na_when_no_more_dates_left():
-    entry = {"baende_bis": "1", "voe_1": "TBA", "voe_2": "", "voe_3": "", "voe_4": "", "voe_5": ""}
+    entry = {"baende_bis": "1", "voe_1": "TBA", "voe_2": "", "voe_3": ""}
     logic.increment_baende(entry)
     assert entry["voe_1"] == "NA"
 

@@ -35,8 +35,6 @@ COL_DEFAULT_WIDTHS = {
     "voe_1": 110,
     "voe_2": 80,
     "voe_3": 80,
-    "voe_4": 80,
-    "voe_5": 80,
     "ruckstand": 90,
 }
 
@@ -88,10 +86,10 @@ def _ruckstand_value(entry) -> Optional[int]:
     return besitz - gelesen
 
 
-# Für "Erscheinende Bücher" / "Ausstehend" in der Seitenleiste: alle fünf
-# VÖ-Spalten durchsuchen, nicht nur VÖ+1, da auch VÖ+2 … VÖ+5 bereits
+# Für "Erscheinende Bücher" / "Ausstehend" in der Seitenleiste: alle drei
+# VÖ-Spalten durchsuchen, nicht nur VÖ+1, da auch VÖ+2 und VÖ+3 bereits
 # bekannte künftige Termine enthalten können.
-VOE_COLUMNS = ["voe_1", "voe_2", "voe_3", "voe_4", "voe_5"]
+VOE_COLUMNS = ["voe_1", "voe_2", "voe_3"]
 
 
 def _entry_voe_dates(entry):
