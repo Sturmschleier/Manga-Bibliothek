@@ -16,6 +16,8 @@ protokolliert.
 - Dateien LOG/bestellung_einlesen_*.log (ein Einlesen einer Bestellung je
   Datei, siehe write_order_log()): es bleiben nur die neuesten
   `order_log_keep` Dateien liegen (Standard 10).
+- Datei LOG/fehler.log: unerwartete Programmfehler mit vollständigem
+  Traceback (siehe log_error(), aufgerufen vom Fehler-Handler in main.py).
 """
 
 from datetime import datetime, timedelta
@@ -26,6 +28,7 @@ from paths import base_dir
 LOG_DIR = base_dir() / "LOG"
 CHANGELOG_FILE = LOG_DIR / "aenderungen.log"
 ARCHIVE_FILE = LOG_DIR / "aenderungen_archiv.log"
+ERROR_LOG_FILE = LOG_DIR / "fehler.log"
 RETENTION_DAYS = 182  # ~6 Monate (Standardwert, überschreibbar über config.json "log_retention_days")
 ISBN_LOG_PATTERN = "isbn_abgleich_*.log"
 ORDER_LOG_PREFIX = "bestellung_einlesen_"
@@ -47,6 +50,20 @@ def log_change(message: str) -> str:
     except OSError:
         pass  # Live-Anzeige funktioniert auch, wenn die Datei nicht beschreibbar ist
     return line
+
+
+def log_error(details: str):
+    """Hängt einen unerwarteten Fehler (Traceback) mit Zeitstempel an
+    LOG/fehler.log an. Gibt den Pfad der Datei zurück, oder None, wenn sie
+    nicht beschreibbar ist."""
+    timestamp = datetime.now().strftime(_TIMESTAMP_FORMAT)
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        with open(ERROR_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"[{timestamp}]\n{details.rstrip()}\n\n")
+    except OSError:
+        return None
+    return str(ERROR_LOG_FILE)
 
 
 def _extract_timestamp(line: str):

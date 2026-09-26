@@ -27,6 +27,37 @@ gesamten Bestand dauerhaft in `manga_library.db`.
 - Ein Google-Drive-Download ersetzt die lokale Datenbank **und** den
   Zwischenspeicher – nicht gespeicherte Änderungen gehen dabei verloren
   (mit Warnung vorher).
+- Schlägt das Speichern fehl (z. B. weil die Datei gerade von einer
+  Cloud-Synchronisierung oder einem Virenscanner gesperrt ist), erscheint
+  eine Meldung und die Änderungen bleiben im Zwischenspeicher. Das gilt
+  auch beim Beenden: Das Fenster bleibt dann offen, statt die Änderungen zu
+  verwerfen.
+
+## Sicherungen & Schutz vor Datenverlust
+
+- **Sicherung vor jedem Speichern:** Bevor die Datenbank überschrieben
+  wird, legt das Programm eine Kopie des bisherigen Stands im Ordner
+  **`BACKUP`** neben der Datenbank an, z. B.
+  `BACKUP/manga_library_2026-09-26_14-32-05-123_vor-speichern.db`. Es
+  bleiben nur die neuesten **20** Sicherungen liegen (`db_backup_keep` in
+  der `config.json`, mindestens 1). Zum Wiederherstellen das Programm
+  beenden und die gewünschte Sicherung als `manga_library.db` in den
+  Programmordner kopieren. Lässt sich keine Sicherung anlegen, fragt das
+  Programm, ob trotzdem gespeichert werden soll.
+- **Google-Drive-Download:** Die Datei wird zuerst vollständig in eine
+  temporäre Datei geladen und geprüft (intakte SQLite-Datenbank mit
+  Bibliotheks-Daten). Erst dann wird die bisherige lokale Datenbank
+  gesichert (`…_vor-download.db`) und ersetzt. Bricht der Download ab oder
+  ist die Datei unbrauchbar, bleibt die lokale Datenbank unverändert.
+- **Nur ein Programmfenster:** Ein zweiter Start, während das Programm
+  bereits läuft, wird mit einem Hinweis abgebrochen – zwei Fenster hätten
+  getrennte Zwischenspeicher, und das zuletzt speichernde würde die
+  Änderungen des anderen überschreiben. Dazu legt das Programm eine
+  Sperrdatei `manga_library.db.lock` an; nach einem Absturz wird sie beim
+  nächsten Start automatisch übernommen.
+- **Unerwartete Fehler** werden als Meldung angezeigt und mit allen
+  Details in `LOG/fehler.log` festgehalten (in der `.exe` gäbe es sonst
+  keinerlei Hinweis).
 
 ## Farbcodierung
 
@@ -454,6 +485,7 @@ Neustart. Enthält u. a.:
 | `isbn_log_keep` | Wie viele ISBN-Abgleich-Logdateien (`LOG/isbn_abgleich_*.log`) liegen bleiben; die ältesten werden gelöscht (mindestens 1) | `10` |
 | `order_log_keep` | Wie viele Logdateien von „Bestellung einlesen“ (`LOG/bestellung_einlesen_*.log`) liegen bleiben; die ältesten werden gelöscht (mindestens 1) | `10` |
 | `log_retention_days` | Änderungsprotokoll: Einträge älter als so viele Tage wandern ins Archiv | `182` |
+| `db_backup_keep` | Wie viele Datenbank-Sicherungen (`BACKUP/manga_library_*.db`, vor jedem Speichern und vor einem Google-Drive-Download) liegen bleiben; die ältesten werden gelöscht (mindestens 1) | `20` |
 | `colors_enabled` | Farbcodierung je Kategorie (de)aktivieren: `voe1`, `komplett_beendet`, `verlag`, `bestellt`, `angekommen` (jeweils `true`/`false`; auch über *Konfigurieren → Farben* schaltbar). Deaktivierte Kategorien zeigen stattdessen die normale Zebra-Streifung. | alle `true` |
 
 Die Datei lässt sich auch direkt in einem Texteditor bearbeiten (z. B.

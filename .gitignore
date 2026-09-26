@@ -15,6 +15,7 @@ token.json
 manga_library.db
 config.json
 LOG/
+BACKUP/
 
 manga_library.db.*
 

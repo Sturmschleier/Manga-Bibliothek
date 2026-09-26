@@ -33,6 +33,9 @@ DEFAULTS = {
     "isbn_log_keep": 10,        # so viele ISBN-Abgleich-Logdateien bleiben liegen (die ältesten werden gelöscht)
     "order_log_keep": 10,       # so viele Logdateien "Bestellung einlesen" bleiben liegen (die ältesten werden gelöscht)
     "log_retention_days": 182,  # Änderungsprotokoll: Einträge älter als N Tage wandern ins Archiv
+    # Datenbank-Sicherungen (BACKUP-Ordner, siehe database.create_backup): vor
+    # jedem Speichern und vor einem Google-Drive-Download
+    "db_backup_keep": 20,       # so viele Sicherungen bleiben liegen (die ältesten werden gelöscht)
     # Postfach-Abruf von Bestellbestätigungen (IMAP, siehe mail_fetch.py).
     # Das Passwort steht bewusst NICHT hier, sondern (optional) in den
     # Windows-Anmeldeinformationen bzw. wird bei Bedarf abgefragt.

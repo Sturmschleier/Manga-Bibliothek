@@ -234,10 +234,41 @@ class MangaLibraryApp(QMainWindow):
         self.statusBar().showMessage("Wiederholt.", 3000)
         self._log("Wiederholt.")
 
-    def save(self):
-        """Schreibt den kompletten Puffer in die Datenbank."""
+    def save(self) -> bool:
+        """Schreibt den kompletten Puffer in die Datenbank. Vorher wird der
+        bisherige Stand der Datenbankdatei nach BACKUP/ gesichert (siehe
+        database.create_backup).
+
+        Gibt True zurück, wenn gespeichert wurde. Bei einem Fehler (z.B.
+        Datei von Cloud-Synchronisierung oder Virenscanner gesperrt,
+        Datenträger voll) erscheint eine Meldung und es wird False
+        zurückgegeben - der Puffer bleibt dann unverändert erhalten, nichts
+        geht verloren."""
         count = len(self.data)
-        self.data = db.replace_all(self.data)
+        try:
+            db.create_backup("vor-speichern")
+        except Exception as exc:  # noqa: BLE001 - dem Nutzer die Ursache zeigen
+            answer = QMessageBox.warning(
+                self, "Sicherung fehlgeschlagen",
+                f"Vor dem Speichern konnte keine Sicherung der Datenbank angelegt werden:\n\n{exc}\n\n"
+                "Trotzdem speichern?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return False
+        try:
+            saved = db.replace_all(self.data)
+        except Exception as exc:  # noqa: BLE001 - ein Speicherfehler darf die Änderungen nicht verschlucken
+            self._log(f"Speichern fehlgeschlagen: {exc}")
+            QMessageBox.critical(
+                self, "Speichern fehlgeschlagen",
+                f"Die Datenbank konnte nicht gespeichert werden:\n\n{exc}\n\n"
+                "Die Änderungen sind weiterhin im Zwischenspeicher. Mögliche Ursache: Die Datei ist "
+                "gerade von einem anderen Programm gesperrt (z. B. Cloud-Synchronisierung oder "
+                "Virenscanner). Bitte später erneut speichern.",
+            )
+            return False
+        self.data = saved
         self._clean_snapshot = copy.deepcopy(self.data)
         self.dirty = False
         self.selected_row_id = None
@@ -245,6 +276,7 @@ class MangaLibraryApp(QMainWindow):
         self.refresh()
         self.statusBar().showMessage(f"Gespeichert – {len(self.data)} Einträge", 5000)
         self._log(f"Gespeichert ({count} Einträge).")
+        return True
 
     def closeEvent(self, event):
         if not self.dirty:
@@ -258,8 +290,11 @@ class MangaLibraryApp(QMainWindow):
         if answer == QMessageBox.Cancel:
             event.ignore()
             return
-        if answer == QMessageBox.Yes:
-            self.save()
+        if answer == QMessageBox.Yes and not self.save():
+            # Speichern fehlgeschlagen: Fenster offen lassen, sonst wären die
+            # Änderungen weg (ein QCloseEvent gilt standardmäßig als akzeptiert).
+            event.ignore()
+            return
         event.accept()
 
     # ------------------------------------------------------------------ UI
@@ -1325,9 +1360,8 @@ class MangaLibraryApp(QMainWindow):
                 "bevor zu Google Drive gesichert werden kann. Jetzt speichern und fortfahren?",
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
             )
-            if answer != QMessageBox.Yes:
+            if answer != QMessageBox.Yes or not self.save():
                 return
-            self.save()
 
         try:
             import drive_sync
@@ -1353,7 +1387,7 @@ class MangaLibraryApp(QMainWindow):
             import drive_sync
             self.statusBar().showMessage("Lade von Google Drive ...")
             QApplication.processEvents()
-            drive_sync.download()
+            backup_path = drive_sync.download()
             db.init_db()  # ältere Sicherung -> Schema ggf. auf den aktuellen Stand migrieren
             self.data = db.load_all()
             self._clean_snapshot = copy.deepcopy(self.data)
@@ -1363,7 +1397,11 @@ class MangaLibraryApp(QMainWindow):
             self._update_undo_redo_actions()
             self._update_title()
             self._autosize_titel_column()
-            QMessageBox.information(self, "Google Drive", "Datenbank wurde erfolgreich von Google Drive geladen.")
+            message = "Datenbank wurde erfolgreich von Google Drive geladen."
+            if backup_path:
+                message += f"\n\nDie bisherige lokale Datenbank wurde gesichert unter:\n{backup_path}"
+            self._log(f"Von Google Drive geladen ({len(self.data)} Einträge, Sicherung: {backup_path or '–'}).")
+            QMessageBox.information(self, "Google Drive", message)
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "Google Drive", str(exc))
         finally:
@@ -1399,9 +1437,8 @@ class MangaLibraryApp(QMainWindow):
                 "Jetzt speichern und fortfahren?",
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
             )
-            if answer != QMessageBox.Yes:
+            if answer != QMessageBox.Yes or not self.save():
                 return
-            self.save()
 
         try:
             import isbn_lookup
