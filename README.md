@@ -281,6 +281,15 @@ markiert.
 - **Die E-Mail selbst wird nicht gespeichert.** Sie wird nur gelesen und im
   Speicher ausgewertet; weder Adresse noch Bestellnummer noch Preise werden
   übernommen. Im Live-Log/Änderungsprotokoll landen nur die markierten Titel.
+- **Eigene Log-Datei je Einlesen:** Jeder Vorgang schreibt
+  `LOG/bestellung_einlesen_<Datum>_<Uhrzeit>.log` (Quelle, Anzahl E-Mails/
+  Artikel, neu markierte Titel mit Band, bereits markierte, schon im Bestand
+  befindliche Bände) und am Ende einen **eigenen Abschnitt „ARTIKEL OHNE
+  PASSENDEN EINTRAG“** mit den nicht zugeordneten Artikeln. Es stehen nur
+  Artikelnamen und Bandnummern drin – keine Adresse, Bestellnummer, Preise
+  oder E-Mail-Dateinamen. Es bleiben nur die neuesten **10** Dateien liegen
+  (`order_log_keep` in der `config.json`, mindestens 1); der Pfad wird im
+  Hinweisfenster nach dem Einlesen angezeigt.
 
 ### Postfach-Abruf (IMAP)
 
@@ -443,6 +452,7 @@ Neustart. Enthält u. a.:
 | `sidebar_width_fraction` | Anteil der Fensterbreite für die Seitenleiste – **wirkt erst beim nächsten Programmstart** (bewusst so: eine bereits von Hand am Trenner verschobene Breite soll nicht ungefragt überschrieben werden) | `0.15` |
 | `exclude_gestoppt_from_stats` | Startwert von „Gestoppt: keine Berechnung“ | `false` |
 | `isbn_log_keep` | Wie viele ISBN-Abgleich-Logdateien (`LOG/isbn_abgleich_*.log`) liegen bleiben; die ältesten werden gelöscht (mindestens 1) | `10` |
+| `order_log_keep` | Wie viele Logdateien von „Bestellung einlesen“ (`LOG/bestellung_einlesen_*.log`) liegen bleiben; die ältesten werden gelöscht (mindestens 1) | `10` |
 | `log_retention_days` | Änderungsprotokoll: Einträge älter als so viele Tage wandern ins Archiv | `182` |
 | `colors_enabled` | Farbcodierung je Kategorie (de)aktivieren: `voe1`, `komplett_beendet`, `verlag`, `bestellt`, `angekommen` (jeweils `true`/`false`; auch über *Konfigurieren → Farben* schaltbar). Deaktivierte Kategorien zeigen stattdessen die normale Zebra-Streifung. | alle `true` |
 

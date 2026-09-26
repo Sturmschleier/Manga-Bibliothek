@@ -31,6 +31,7 @@ DEFAULTS = {
     "isbn_fallback_provider": "buchhandel.de",
     # Protokolle (LOG-Ordner, siehe changelog.py)
     "isbn_log_keep": 10,        # so viele ISBN-Abgleich-Logdateien bleiben liegen (die ältesten werden gelöscht)
+    "order_log_keep": 10,       # so viele Logdateien "Bestellung einlesen" bleiben liegen (die ältesten werden gelöscht)
     "log_retention_days": 182,  # Änderungsprotokoll: Einträge älter als N Tage wandern ins Archiv
     # Postfach-Abruf von Bestellbestätigungen (IMAP, siehe mail_fetch.py).
     # Das Passwort steht bewusst NICHT hier, sondern (optional) in den

@@ -59,6 +59,7 @@ class MangaLibraryApp(QMainWindow):
         config.ensure_file_exists()
         changelog.archive_old_entries()
         changelog.prune_isbn_logs()
+        changelog.prune_order_logs()
 
         db.init_db()
 
@@ -1117,9 +1118,9 @@ class MangaLibraryApp(QMainWindow):
             self, "Bestellbestätigung(en) (E-Mail) auswählen", "", "E-Mail (*.eml)"
         )
         if paths:
-            self._import_order_files(paths)
+            self._import_order_files(paths, "E-Mail-Datei(en)")
 
-    def _import_order_files(self, paths):
+    def _import_order_files(self, paths, source):
         """Liest die angegebenen .eml-Dateien (Dialog oder Drag & Drop) ein.
         Die Dateien werden nur gelesen, nichts davon wird abgelegt."""
         items, problems = [], []
@@ -1134,9 +1135,9 @@ class MangaLibraryApp(QMainWindow):
                 "Aus den gewählten Dateien konnte keine Bestellung gelesen werden:\n\n" + "\n".join(problems),
             )
             return
-        self._apply_order_items(items, len(paths) - len(problems), problems)
+        self._apply_order_items(items, len(paths) - len(problems), source, problems)
 
-    def _apply_order_items(self, items, mail_count, problems=()):
+    def _apply_order_items(self, items, mail_count, source, problems=()):
         """Ordnet die Artikel den Einträgen zu und markiert diese: Bestell-
         bestätigung -> Feld "bestellt" (Titel hellblau), Abhol-Benachrichtigung
         -> Feld "angekommen" (roter Balken links am Titel). Gemeinsamer Weg
@@ -1162,6 +1163,16 @@ class MangaLibraryApp(QMainWindow):
                         + ", ".join(f"{m.entry.get('titel')} Bd. {m.band}" for m in group) + ")."
                     )
 
+        # Eigenes Protokoll je Vorgang (LOG/bestellung_einlesen_*.log), inkl. eigenem
+        # Abschnitt für Artikel ohne passenden Eintrag.
+        log_path, log_error = None, None
+        try:
+            log_path = changelog.write_order_log(order_mail.build_log(
+                source, mail_count, items, matches, new_matches, already_owned, unmatched, problems,
+            ))
+        except OSError as exc:
+            log_error = str(exc)
+
         lines = [f"{mail_count} E-Mail(s), {len(items)} Artikel, {len(matches)} Titel zugeordnet."]
         if new_ordered:
             lines.append(f"{len(new_ordered)} neu als bestellt markiert (hellblau).")
@@ -1177,6 +1188,10 @@ class MangaLibraryApp(QMainWindow):
             lines.append(f"{len(unmatched)} Artikel ohne passenden Eintrag (z. B. Sonderausgaben).")
         if problems:
             lines.append(f"{len(problems)} Datei(en) nicht lesbar.")
+        if log_path:
+            lines.append(f"Protokoll: {log_path}")
+        elif log_error:
+            lines.append(f"Protokoll konnte nicht geschrieben werden: {log_error}")
 
         details = []
         if already_owned:
@@ -1264,7 +1279,7 @@ class MangaLibraryApp(QMainWindow):
         chosen = dlg.selected_mails()
         if not chosen:
             return
-        self._apply_order_items([item for m in chosen for item in m.items], len(chosen))
+        self._apply_order_items([item for m in chosen for item in m.items], len(chosen), "Postfach (IMAP)")
 
     # -- Drag & Drop von .eml-Dateien auf das Fenster
 
@@ -1285,7 +1300,7 @@ class MangaLibraryApp(QMainWindow):
         paths = self._dropped_eml_paths(event.mimeData())
         if paths:
             event.acceptProposedAction()
-            self._import_order_files(paths)
+            self._import_order_files(paths, "Drag & Drop")
         else:
             super().dropEvent(event)
 

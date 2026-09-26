@@ -13,6 +13,9 @@ protokolliert.
 - Dateien LOG/isbn_abgleich_*.log (ein ISBN-Abgleich je Datei): es bleiben
   nur die neuesten `isbn_log_keep` Dateien liegen (Standard 10), ältere
   werden gelöscht - siehe prune_isbn_logs().
+- Dateien LOG/bestellung_einlesen_*.log (ein Einlesen einer Bestellung je
+  Datei, siehe write_order_log()): es bleiben nur die neuesten
+  `order_log_keep` Dateien liegen (Standard 10).
 """
 
 from datetime import datetime, timedelta
@@ -25,6 +28,8 @@ CHANGELOG_FILE = LOG_DIR / "aenderungen.log"
 ARCHIVE_FILE = LOG_DIR / "aenderungen_archiv.log"
 RETENTION_DAYS = 182  # ~6 Monate (Standardwert, überschreibbar über config.json "log_retention_days")
 ISBN_LOG_PATTERN = "isbn_abgleich_*.log"
+ORDER_LOG_PREFIX = "bestellung_einlesen_"
+ORDER_LOG_PATTERN = ORDER_LOG_PREFIX + "*.log"
 
 _TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 
@@ -56,21 +61,17 @@ def _extract_timestamp(line: str):
         return None
 
 
-def prune_isbn_logs(keep: int = None) -> int:
-    """
-    Löscht die ältesten ISBN-Abgleich-Logdateien (LOG/isbn_abgleich_*.log),
-    sodass höchstens `keep` Dateien übrig bleiben (Standard: config.json
-    "isbn_log_keep", mindestens 1). Der Dateiname enthält Datum und Uhrzeit,
-    "älter" richtet sich daher nach dem Namen. Gibt die Anzahl gelöschter
-    Dateien zurück; Fehler (z.B. gesperrte Datei) werden ignoriert - das ist
-    reines Aufräumen und darf weder Programmstart noch Abgleich stören.
-    """
-    if keep is None:
-        keep = config.get_int("isbn_log_keep", 10)
+def _prune_logs(pattern: str, keep: int) -> int:
+    """Löscht die ältesten Dateien zu `pattern` im LOG-Ordner, sodass
+    höchstens `keep` (mindestens 1) übrig bleiben. Der Dateiname enthält
+    Datum und Uhrzeit, "älter" richtet sich daher nach dem Namen. Gibt die
+    Anzahl gelöschter Dateien zurück; Fehler (z.B. gesperrte Datei) werden
+    ignoriert - das ist reines Aufräumen und darf weder Programmstart noch
+    den eigentlichen Vorgang stören."""
     keep = max(1, keep)
     deleted = 0
     try:
-        files = sorted(LOG_DIR.glob(ISBN_LOG_PATTERN), key=lambda p: p.name)
+        files = sorted(LOG_DIR.glob(pattern), key=lambda p: p.name)
     except OSError:
         return 0
     for path in files[:-keep]:
@@ -80,6 +81,44 @@ def prune_isbn_logs(keep: int = None) -> int:
         except OSError:
             pass
     return deleted
+
+
+def prune_isbn_logs(keep: int = None) -> int:
+    """Begrenzt LOG/isbn_abgleich_*.log auf die neuesten `keep` Dateien
+    (Standard: config.json "isbn_log_keep", 10)."""
+    if keep is None:
+        keep = config.get_int("isbn_log_keep", 10)
+    return _prune_logs(ISBN_LOG_PATTERN, keep)
+
+
+def prune_order_logs(keep: int = None) -> int:
+    """Begrenzt LOG/bestellung_einlesen_*.log auf die neuesten `keep` Dateien
+    (Standard: config.json "order_log_keep", 10)."""
+    if keep is None:
+        keep = config.get_int("order_log_keep", 10)
+    return _prune_logs(ORDER_LOG_PATTERN, keep)
+
+
+def write_order_log(lines: list) -> str:
+    """Schreibt das Protokoll eines Einlesens einer Bestellung als eigene
+    Datei LOG/bestellung_einlesen_<Datum>_<Uhrzeit>.log, räumt danach alte
+    Dateien weg (siehe prune_order_logs) und gibt den Pfad zurück. Löst
+    OSError aus, wenn nicht geschrieben werden kann."""
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    # Dateiname mit Datum, Uhrzeit und Millisekunden; der Name muss immer größer
+    # sein als alle vorhandenen (das Aufräumen sortiert nach dem Namen), auch
+    # wenn mehrere Vorgänge innerhalb derselben Millisekunde geschrieben werden.
+    newest = max((p.name for p in LOG_DIR.glob(ORDER_LOG_PATTERN)), default="")
+    moment = datetime.now()
+    while True:
+        name = f"{ORDER_LOG_PREFIX}{moment.strftime('%Y-%m-%d_%H-%M-%S')}-{moment.microsecond // 1000:03d}.log"
+        if name > newest:
+            break
+        moment += timedelta(milliseconds=1)
+    path = LOG_DIR / name
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    prune_order_logs()
+    return str(path)
 
 
 def archive_old_entries(retention_days: int = None) -> int:
