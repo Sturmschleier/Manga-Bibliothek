@@ -1,5 +1,7 @@
 # Manga & Light Novel Bibliothek
 
+[![Tests](https://github.com/Sturmschleier/Manga-Bibliothek/actions/workflows/tests.yml/badge.svg)](https://github.com/Sturmschleier/Manga-Bibliothek/actions/workflows/tests.yml)
+
 Ein Desktop-Programm (Python + Qt/PySide6), das deine Manga-, Manhwa- und
 Light-Novel-Sammlung in einer lokalen Datenbank verwaltet – mit allen
 Spalten aus deiner bisherigen Liste, grafisch bearbeitbar, sortierbar,
@@ -706,6 +708,13 @@ Für alle Module ohne Qt-Oberfläche gibt es eine pytest-Suite unter
 pip install -r requirements-dev.txt
 pytest
 ```
+
+**Automatisch auf GitHub (CI):** Bei jedem Push auf `main` und bei jedem
+Pull Request führt GitHub Actions die Tests auf einem frischen
+Windows-Rechner aus – mit Python 3.9 (älteste unterstützte Version) und
+3.14 (`.github/workflows/tests.yml`). Das Ergebnis steht im Pull Request
+(grüner Haken bzw. rotes Kreuz) und als Abzeichen oben in dieser README;
+über den Reiter „Actions“ lässt sich ein Durchlauf auch von Hand starten.
 
 ## Formales Datenmodell (models.py)
 

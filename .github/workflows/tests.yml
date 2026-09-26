@@ -1,0 +1,50 @@
+# Automatische Tests (CI): führt bei jedem Push auf main und bei jedem Pull
+# Request die pytest-Suite auf einem frischen Windows-Rechner aus - mit der
+# ältesten laut README unterstützten Python-Version und einer aktuellen.
+# Das Ergebnis erscheint im Pull Request als grüner Haken bzw. rotes Kreuz.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:   # von Hand startbar (Reiter "Actions" auf GitHub)
+
+permissions:
+  contents: read
+
+concurrency:
+  # ein neuer Push bricht einen noch laufenden Durchgang desselben Branches ab
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    name: pytest (Windows, Python ${{ matrix.python-version }})
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.14"]
+
+    steps:
+      - name: Code auschecken
+        uses: actions/checkout@v5
+
+      - name: Python ${{ matrix.python-version }} einrichten
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Abhängigkeiten installieren
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Tests ausführen
+        run: python -m pytest -q
