@@ -4,7 +4,8 @@ Version und Programminformationen für den Dialog "Hilfe → Über …" - ohne
 Qt, damit sie sich testen lassen.
 
 Neue Version veröffentlichen: VERSION anheben, mergen und das GitHub-Release
-mit dem Tag "v<VERSION>" anlegen (siehe README, Abschnitt "Neue Version").
+mit dem Tag "v<VERSION>" anlegen (siehe ENTWICKLUNG.md, Kapitel "Neue Version
+veröffentlichen").
 """
 
 import platform
