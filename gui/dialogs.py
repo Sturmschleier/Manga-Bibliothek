@@ -2,18 +2,23 @@
 gui/dialogs.py
 Kleinere, in sich geschlossene Dialoge: EntryDialog (Werk anlegen/
 bearbeiten), ConfigDialog (config.json direkt editieren), IsbnLookupDialog
-(Auswahl vor einem ISBN-Abgleich).
+(Auswahl vor einem ISBN-Abgleich), AboutDialog (Hilfe → Über …).
 """
 
+import html
 import json
 from datetime import date
 
+from PySide6.QtCore import Qt, QTimer, QUrl, qVersion
 from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
     QFormLayout,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -21,15 +26,18 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
 )
 
+import appinfo
 import config
 import database as db
 import logic
 import shops
 
-from .constants import JA_NEIN_OPTIONEN, TYP_OPTIONEN
+from .constants import APP_TITLE, JA_NEIN_OPTIONEN, TYP_OPTIONEN
 
 
 class EntryDialog(QDialog):
@@ -269,3 +277,68 @@ class IsbnLookupDialog(QDialog):
         else:
             self.on_submit(("status", "NA", overwrite))
         self.accept()
+
+
+class AboutDialog(QDialog):
+    """Hilfe → Über …: Version, Links zum Quellcode und zum Datenordner sowie
+    die verwendeten Module mit Version, Zweck und Lizenz (siehe appinfo.py)."""
+
+    def __init__(self, parent, data_dir):
+        super().__init__(parent)
+        self.setWindowTitle(f"Über {APP_TITLE}")
+
+        self._text = appinfo.about_text(qVersion(), str(data_dir))
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(f"<h2>{html.escape(APP_TITLE)}</h2>Version {appinfo.VERSION}"))
+
+        data_url = QUrl.fromLocalFile(str(data_dir)).toString()
+        info = QLabel(
+            "Verwaltet deine Manga-, Manhwa- und Light-Novel-Sammlung.<br><br>"
+            f'Quellcode und Versionen: <a href="{appinfo.REPOSITORY_URL}">{appinfo.REPOSITORY_URL}</a><br>'
+            f'Datenordner (Datenbank, LOG, BACKUP): <a href="{html.escape(data_url)}">{html.escape(str(data_dir))}</a>'
+        )
+        info.setTextFormat(Qt.RichText)
+        info.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        info.setOpenExternalLinks(True)
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        layout.addWidget(QLabel("<b>Verwendete Module</b>"))
+        rows = appinfo.components(qVersion())
+        table = QTableWidget(len(rows), 4)
+        table.setHorizontalHeaderLabels(["Modul", "Version", "Verwendet für", "Lizenz"])
+        for row, component in enumerate(rows):
+            values = (component.name, component.version or "nicht installiert", component.zweck, component.lizenz)
+            for column, value in enumerate(values):
+                table.setItem(row, column, QTableWidgetItem(value))
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.setSelectionMode(QAbstractItemView.NoSelection)
+        table.verticalHeader().setVisible(False)
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.Stretch)
+        # kompakte Zeilen, und alle Module ohne Scrollen zeigen
+        row_height = table.fontMetrics().height() + 6
+        table.verticalHeader().setDefaultSectionSize(row_height)
+        table.setMinimumHeight(
+            header.sizeHint().height() + row_height * table.rowCount() + 2 * table.frameWidth() + 6
+        )
+        layout.addWidget(table, 1)
+
+        btn_row = QHBoxLayout()
+        self.copy_btn = QPushButton("In Zwischenablage kopieren")
+        self.copy_btn.setToolTip("Version und Module als Text kopieren – z.B. für eine Fehlermeldung")
+        self.copy_btn.clicked.connect(self._copy)
+        close_btn = QPushButton("Schließen")
+        close_btn.clicked.connect(self.accept)
+        btn_row.addWidget(self.copy_btn)
+        btn_row.addStretch(1)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+        self.resize(760, self.minimumSizeHint().height())
+
+    def _copy(self):
+        QApplication.clipboard().setText(self._text)
+        self.copy_btn.setText("✓ Kopiert")
+        QTimer.singleShot(1500, lambda: self.copy_btn.setText("In Zwischenablage kopieren"))

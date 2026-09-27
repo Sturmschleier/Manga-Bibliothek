@@ -36,6 +36,6 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = [
-    "changelog", "colors", "config", "csv_export", "database", "drive_sync", "gui", "import_csv",
+    "appinfo", "changelog", "colors", "config", "csv_export", "database", "drive_sync", "gui", "import_csv",
     "isbn_lookup", "library", "logic", "mail_fetch", "main", "models", "order_mail", "paths", "shops", "sorting",
 ]

@@ -74,7 +74,7 @@ from .constants import (
     _ruckstand_value,
     _voe1_category,
 )
-from .dialogs import ConfigDialog, EntryDialog, IsbnLookupDialog
+from .dialogs import AboutDialog, ConfigDialog, EntryDialog, IsbnLookupDialog
 from .isbn_view import IsbnResultWindow
 from .mail_dialogs import MailSelectDialog, MailSettingsDialog
 from .table import CellDelegate, MangaTableModel
@@ -290,8 +290,8 @@ class MangaLibraryApp(QMainWindow):
 
     def _build_menu_bar(self):
         """Menüleiste: "Datei" (Eintrags-Verwaltung, CSV-Import/-Export,
-        Google-Drive-Download) und "Konfigurieren" (Farbcodierung,
-        Konfiguration, Anzeige-/Berechnungsoptionen)."""
+        Google-Drive-Download), "Konfigurieren" (Farbcodierung,
+        Konfiguration, Anzeige-/Berechnungsoptionen) und "Hilfe" (Über …)."""
         file_menu = self.menuBar().addMenu("&Datei")
 
         add_action = file_menu.addAction("Neuer Eintrag")
@@ -373,6 +373,15 @@ class MangaLibraryApp(QMainWindow):
             "Der Wert wird dauerhaft in der Konfigurationsdatei gemerkt."
         )
         self.exclude_gestoppt_action.toggled.connect(self._on_exclude_gestoppt_toggled)
+
+        help_menu = self.menuBar().addMenu("&Hilfe")
+        about_action = help_menu.addAction(f"Über {APP_TITLE} …")
+        about_action.setToolTip("Version, Datenordner und verwendete Module")
+        about_action.triggered.connect(self.open_about_dialog)
+
+    def open_about_dialog(self):
+        # Datenordner = Ordner der Datenbank (neben der exe bzw. neben main.py)
+        AboutDialog(self, db.DB_FILE.parent).exec()
 
     def _build_toolbar(self, root):
         bar = QHBoxLayout()

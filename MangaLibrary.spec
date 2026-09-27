@@ -11,9 +11,25 @@
 # - Von den über 500 Google-API-Beschreibungen (ca. 100 MB) wird nur die für
 #   Google Drive v3 gebraucht (drive_sync.py: build("drive", "v3")).
 
-from PyInstaller.utils.hooks import collect_all, collect_data_files
+import sys
+from importlib.metadata import PackageNotFoundError
+
+from PyInstaller.utils.hooks import collect_all, collect_data_files, copy_metadata
+
+sys.path.insert(0, SPECPATH)
+from appinfo import LIBRARIES  # noqa: E402 - Paketliste des Dialogs "Hilfe → Über …"
 
 datas = collect_data_files("googleapiclient", includes=["discovery_cache/documents/drive.v3.json"])
+
+# Versionsangaben der verwendeten Bibliotheken (Paket-Metadaten) mitnehmen,
+# damit "Hilfe → Über …" auch in der exe die Versionen anzeigen kann
+for _name, packages, _zweck, _lizenz in LIBRARIES:
+    for package in packages:
+        try:
+            datas += copy_metadata(package)
+            break
+        except PackageNotFoundError:
+            continue   # z.B. die Hülle "PySide6", wenn nur PySide6-Essentials installiert ist
 binaries = []
 hiddenimports = [
     "google_auth_httplib2",       # einzelnes Modul, wird von googleapiclient nur bei Bedarf geladen

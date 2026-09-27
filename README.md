@@ -447,6 +447,11 @@ gespeichert) sind enthalten.
 - **Menü „Konfigurieren“** – Farben (Untermenü), Konfiguration sowie die
   Schalter „Nach Bearbeitung zur Zeile springen“ und „Gestoppt: keine
   Berechnung“
+- **Menü „Hilfe“ → „Über …“** – zeigt die Programmversion, den Link zum
+  Quellcode, den Datenordner (Datenbank, `LOG`, `BACKUP` – per Klick im
+  Explorer öffnen) und alle verwendeten Module mit Version, Zweck und Lizenz.
+  „In Zwischenablage kopieren“ liefert das Ganze als Text, z. B. für eine
+  Fehlermeldung.
 - **Bei buchhandel.de suchen** (Datei-Menü, Strg+B oder Rechtsklick auf eine
   Tabellenzeile) – öffnet im Browser die buchhandel.de-Suche für den
   markierten Titel (gedruckte Bücher ab dem aktuellen Erscheinungsjahr,
@@ -671,6 +676,20 @@ Modul meldet: Das Modul in `MangaLibrary.spec` bei `hiddenimports`
 ergänzen und neu bauen. Unerwartete Fehler stehen mit allen Details in
 `LOG\fehler.log` neben der exe.
 
+### Neue Version veröffentlichen
+
+Die Versionsnummer steht an genau einer Stelle: `VERSION` in `appinfo.py`
+(angezeigt unter „Hilfe → Über …“). Für ein neues Release:
+
+1. `VERSION` anheben (z. B. `1.0.3` → `1.0.4`) und per Pull Request mergen.
+2. Mit `build.bat` die exe aus dem aktuellen `main` bauen.
+3. Auf GitHub ein Release mit dem Tag `v<VERSION>` (z. B. `v1.0.4`) anlegen
+   und `dist\MangaLibrary.exe` anhängen.
+
+Neue Bibliotheken bei Bedarf in `appinfo.LIBRARIES` eintragen – dann
+erscheinen sie im Dialog, und `MangaLibrary.spec` packt ihre Versionsangaben
+automatisch mit in die exe.
+
 ## Projektstruktur
 
 ```
@@ -686,6 +705,7 @@ mangalib/
 │   ├── worker.py         AsyncCall (Hintergrund-Aufgaben mit Qt-Signalen)
 │   └── main_window.py    MangaLibraryApp (Hauptfenster)
 ├── library.py          Zwischenspeicher mit Rückgängig/Wiederholen (ohne Qt, getestet)
+├── appinfo.py          Versionsnummer und Liste der verwendeten Module (Hilfe → Über …)
 ├── models.py           Werk-Dataclass (formales Datenmodell, dict-kompatibel)
 ├── config.py           Zentrale Konfiguration (config.json)
 ├── changelog.py        Änderungsprotokoll, Log-Dateien, Fehler-Log
