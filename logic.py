@@ -19,6 +19,10 @@ EXCEEDS = "exceeds"
 # die Bandnummer, für die die Markierung gilt.
 MARK_FIELDS = ("bestellt", "angekommen")
 
+# Auswahl des Bestellstatus-Filters in der Werkzeugleiste
+ORDER_FILTER_ALL = "Alle"
+ORDER_FILTER_OPTIONS = (ORDER_FILTER_ALL, "Bestellt", "Angekommen", "Bestellt oder angekommen", "Nicht bestellt")
+
 
 def parse_int(value) -> Optional[int]:
     """Ganze Zahl aus einem Feldwert (Text wie "12", " 7 "), sonst None -
@@ -91,6 +95,30 @@ def clear_fulfilled_marks(entry: dict) -> bool:
             entry[field_name] = ""
             changed = True
     return changed
+
+
+def matches_order_filter(entry: dict, option: str) -> bool:
+    """
+    Prüft einen Eintrag gegen den Bestellstatus-Filter (ORDER_FILTER_OPTIONS):
+      - "Bestellt": Markierung "bestellt" gesetzt (hellblau)
+      - "Angekommen": Markierung "angekommen" gesetzt (roter Balken)
+      - "Bestellt oder angekommen": mindestens eine der beiden
+      - "Nicht bestellt": keine der beiden Markierungen
+    Ein Eintrag kann beide Markierungen tragen (z.B. Band 13 angekommen,
+    Band 14 bestellt) und erscheint dann unter "Bestellt" wie unter
+    "Angekommen". "Alle" und unbekannte Werte lassen alles durch.
+    """
+    ordered = bool((entry.get("bestellt") or "").strip())
+    arrived = bool((entry.get("angekommen") or "").strip())
+    if option == "Bestellt":
+        return ordered
+    if option == "Angekommen":
+        return arrived
+    if option == "Bestellt oder angekommen":
+        return ordered or arrived
+    if option == "Nicht bestellt":
+        return not (ordered or arrived)
+    return True
 
 
 def increment_baende(entry: dict) -> Optional[int]:

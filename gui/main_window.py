@@ -375,6 +375,10 @@ class MangaLibraryApp(QMainWindow):
         self.exclude_gestoppt_action.toggled.connect(self._on_exclude_gestoppt_toggled)
 
         help_menu = self.menuBar().addMenu("&Hilfe")
+        log_action = help_menu.addAction("LOG-Ordner öffnen")
+        log_action.setToolTip("Änderungsprotokoll, Protokolle von ISBN-Abgleich und Bestellungen, fehler.log")
+        log_action.triggered.connect(self.open_log_folder)
+        help_menu.addSeparator()
         about_action = help_menu.addAction(f"Über {APP_TITLE} …")
         about_action.setToolTip("Version, Datenordner und verwendete Module")
         about_action.triggered.connect(self.open_about_dialog)
@@ -382,6 +386,17 @@ class MangaLibraryApp(QMainWindow):
     def open_about_dialog(self):
         # Datenordner = Ordner der Datenbank (neben der exe bzw. neben main.py)
         AboutDialog(self, db.DB_FILE.parent).exec()
+
+    def open_log_folder(self):
+        """Öffnet den LOG-Ordner im Explorer - legt ihn an, falls noch kein
+        Protokoll geschrieben wurde."""
+        try:
+            changelog.LOG_DIR.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            QMessageBox.warning(self, "LOG-Ordner", f"Der Ordner konnte nicht angelegt werden:\n{exc}")
+            return
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(changelog.LOG_DIR))):
+            QMessageBox.warning(self, "LOG-Ordner", f"Der Ordner konnte nicht geöffnet werden:\n{changelog.LOG_DIR}")
 
     def _build_toolbar(self, root):
         bar = QHBoxLayout()
@@ -478,6 +493,19 @@ class MangaLibraryApp(QMainWindow):
         self.voe1_filter.currentIndexChanged.connect(lambda _i: self._refresh_table())
         bar.addWidget(self.voe1_filter)
 
+        bar.addSpacing(16)
+        bar.addWidget(QLabel("Bestellung:"))
+        self.order_filter = QComboBox()
+        self.order_filter.addItems(logic.ORDER_FILTER_OPTIONS)
+        self.order_filter.setMinimumWidth(120)
+        self.order_filter.setToolTip(
+            "Nach Bestell-Markierung filtern:\n"
+            "Bestellt = Titel hellblau, Angekommen = roter Balken links,\n"
+            "Nicht bestellt = keine der beiden Markierungen."
+        )
+        self.order_filter.currentIndexChanged.connect(lambda _i: self._refresh_table())
+        bar.addWidget(self.order_filter)
+
         reset_btn = QPushButton("Filter zurücksetzen")
         reset_btn.clicked.connect(self._reset_filters)
         bar.addSpacing(16)
@@ -512,6 +540,7 @@ class MangaLibraryApp(QMainWindow):
     def _reset_filters(self):
         self.verlag_filter.setCurrentIndex(0)
         self.voe1_filter.setCurrentIndex(0)
+        self.order_filter.setCurrentIndex(0)
         self.search_input.clear()
 
     def _refresh_verlag_filter_options(self):
@@ -866,6 +895,9 @@ class MangaLibraryApp(QMainWindow):
         if voe1_filter and voe1_filter != "Alle":
             wanted_category = voe1_filter.lower() if voe1_filter != "Mit Datum" else "datum"
             rows = [e for e in rows if _voe1_category(e.get("voe_1")) == wanted_category]
+        order_filter = self.order_filter.currentText() if self.order_filter.count() else logic.ORDER_FILTER_ALL
+        if order_filter != logic.ORDER_FILTER_ALL:
+            rows = [e for e in rows if logic.matches_order_filter(e, order_filter)]
 
         rows = list(rows)
         if self.sort_column == RUCKSTAND_COLUMN:
