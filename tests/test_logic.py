@@ -4,6 +4,8 @@ Tests für logic.py: die "+1"-Buttons-Logik (Bände (bis) und Gelesen bis).
 Reine Funktionen ohne Datenbank-/GUI-Abhängigkeit.
 """
 
+import pytest
+
 import logic
 
 # --------------------------------------------------------------- increment_baende
@@ -169,3 +171,21 @@ def test_validate_entry_checks_numbers_and_dates():
 
 def test_validate_entry_gelesen_not_above_baende():
     assert "nicht größer" in logic.validate_entry(_values(baende_bis="5", gelesen_bis="6"))[0]
+
+
+@pytest.mark.parametrize("bestellt, angekommen, expected", [
+    ("", "", {"Alle", "Nicht bestellt"}),
+    ("14", "", {"Alle", "Bestellt", "Bestellt oder angekommen"}),
+    ("", "13", {"Alle", "Angekommen", "Bestellt oder angekommen"}),
+    ("14", "13", {"Alle", "Bestellt", "Angekommen", "Bestellt oder angekommen"}),
+    ("  ", None, {"Alle", "Nicht bestellt"}),
+])
+def test_matches_order_filter(bestellt, angekommen, expected):
+    entry = {"titel": "X", "bestellt": bestellt, "angekommen": angekommen}
+    matching = {option for option in logic.ORDER_FILTER_OPTIONS if logic.matches_order_filter(entry, option)}
+    assert matching == expected
+
+
+def test_matches_order_filter_entry_without_mark_fields():
+    assert logic.matches_order_filter({"titel": "X"}, "Nicht bestellt")
+    assert not logic.matches_order_filter({"titel": "X"}, "Bestellt")

@@ -128,7 +128,7 @@ Bestell-Markierungen – wirken zunächst nur im **Zwischenspeicher**. Erst
 - **Menü „Konfigurieren“:** Farben, Konfiguration …, Postfach (IMAP) … und
   die Schalter „Nach Bearbeitung zur Zeile springen“ und „Gestoppt: keine
   Berechnung“ (siehe [Kapitel 8](#8-konfiguration)).
-- **Menü „Hilfe“:** Über … (siehe [Kapitel 9](#9-hilfe-und-fehlersuche)).
+- **Menü „Hilfe“:** LOG-Ordner öffnen, Über … (siehe [Kapitel 9](#9-hilfe-und-fehlersuche)).
 
 In der **Tabelle**:
 - **Doppelklick** auf eine Zeile öffnet das Formular (außer auf den
@@ -145,7 +145,10 @@ In der **Tabelle**:
 
 **Suche und Filter:** Die Suche oben in der Seitenleiste filtert live über
 alle Spalten. Dazu kommen in der Werkzeugleiste die Filter **Verlag** und
-**VÖ +1** (Beendet, TBA, Gestoppt, NA oder „Mit Datum“); alle lassen sich
+**VÖ +1** (Beendet, TBA, Gestoppt, NA oder „Mit Datum“) sowie
+**Bestellung**: „Bestellt“ (Titel hellblau), „Angekommen“ (roter Balken),
+„Bestellt oder angekommen“ und „Nicht bestellt“ (keine Markierung, siehe
+[Kapitel 5](#5-bestellungen-aus-e-mails)). Alle lassen sich
 kombinieren. „Filter zurücksetzen“ leert Filter und Suche auf einmal.
 
 **Bei buchhandel.de suchen** öffnet im Browser die Suche nach dem markierten
@@ -454,6 +457,9 @@ aufbewahrt.
 Datenordner (per Klick im Explorer öffnen) und alle verwendeten Module mit
 Version, Zweck und Lizenz. **„In Zwischenablage kopieren“** liefert das
 Ganze als Text – praktisch für eine Fehlermeldung.
+
+**Hilfe → LOG-Ordner öffnen** öffnet den Ordner `LOG` mit allen
+Protokollen direkt im Explorer.
 
 **Im Datenordner** (neben der exe bzw. neben `main.py`):
 
