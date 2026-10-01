@@ -6,6 +6,8 @@ Ein Windows-Programm, das deine Manga-, Manhwa- und Light-Novel-Sammlung in
 einer lokalen Datenbank verwaltet: Bände, Lesestand, Verlage und
 Erscheinungstermine – sortierbar, durchsuchbar und farbcodiert.
 
+![Hauptfenster mit Tabelle, Farbcodierung und Seitenleiste](docs/screenshots/1-hauptfenster.png)
+
 Hinweise zu Quellcode, Tests und dem Bau der exe stehen in
 [ENTWICKLUNG.md](ENTWICKLUNG.md).
 
@@ -35,6 +37,15 @@ Hinweise zu Quellcode, Tests und dem Bau der exe stehen in
   Buchhändler.
 - **Sicher:** Änderungen werden erst beim Speichern übernommen, vor jedem
   Speichern entsteht eine Sicherung; optional zusätzlich in Google Drive.
+
+### Screenshots
+
+| | |
+|---|---|
+| ![Filter „Bestellung: Bestellt“](docs/screenshots/2-filter-bestellt.png) | ![Bearbeiten-Formular](docs/screenshots/3-bearbeiten.png) |
+| Filter „Bestellung: Bestellt“ – nur die hellblau markierten Titel | Bearbeiten-Formular |
+| ![ISBN-Abgleich und Bestellliste](docs/screenshots/4-bestellliste.png) | ![Hilfe → Über …](docs/screenshots/5-ueber.png) |
+| ISBN-Abgleich mit Bestellliste, Sonderausgaben golden | Hilfe → Über … mit den verwendeten Modulen |
 
 ## 2. Installation und Start
 
