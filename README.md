@@ -361,6 +361,10 @@ Band „Bände (bis)“ + 1 nach VÖ +1, + 2 nach VÖ +2 usw. Eine Lücke (Band 
 noch nicht angekündigt, Band + 2 schon) bricht die Zuordnung ab, damit kein
 Termin in die falsche Spalte rutscht.
 
+- **Einzelner Titel:** Rechtsklick auf einen Eintrag → **Neue VÖ-Termine
+  abfragen** fragt nur diese eine Serie ab. Die Überspringregel gilt dabei
+  nicht (auch bei „Komplett“ wird abgefragt); Freitext wie „Fortlaufend“
+  wird trotzdem nie überschrieben.
 - **Auswahl:** Vor dem Start wählst du, welche Serien abgefragt werden –
   *Alle*, *nur mit Datum in VÖ +1*, *nur TBA* oder *nur NA* –, jeweils mit
   Anzahl und geschätzter Dauer. So lässt sich die Abfrage verkürzen.

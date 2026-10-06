@@ -452,3 +452,18 @@ def test_check_entries_only_queries_selected_scope():
     )
     assert len(queries) == 1 and "Ohne" in queries[0]
     assert {r.entry_id: r.status for r in results} == {2: "unklar", 3: "uebersprungen"}   # "Mit Datum" fehlt ganz
+
+
+def test_explicit_single_title_ignores_skip_rule_but_not_unusable_entries():
+    queries = []
+    fetch = lambda q: queries.append(q) or [product("Serie 3", "01.03.2027")]   # noqa: E731
+    done = entry("Serie", 2, id=1, komplett="Ja")
+    results, _ = vlb.check_entries([done], respect_skip=False, fetch=fetch, sleep=lambda s: None)
+    assert len(queries) == 1 and results[0].status == "neu"
+    # Freitext "Fortlaufend" wird auch auf ausdrücklichen Wunsch nicht überschrieben, der Fund bleibt sichtbar
+    ongoing = entry("Serie", 2, id=3, voe_1="Fortlaufend")
+    results, _ = vlb.check_entries([ongoing], respect_skip=False, fetch=fetch, sleep=lambda s: None)
+    assert results[0].changes == {} and [v.band for v in results[0].volumes] == [3]
+    broken = entry("Serie", "viele", id=2)
+    results, _ = vlb.check_entries([broken], respect_skip=False, fetch=fetch, sleep=lambda s: None)
+    assert len(queries) == 2 and results[0].status == "uebersprungen"   # keine dritte Abfrage

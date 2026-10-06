@@ -140,13 +140,22 @@ def skip_reason(entry: dict) -> Optional[str]:
     nicht auf Stand), "Gestoppt" oder "Beendet". Die Spalte "Beendet" zählt
     nicht - sie sagt nur, dass die Reihe abgeschlossen ist, nicht dass man
     sie komplett hat. "NA" und "TBA" werden abgefragt."""
-    if not (entry.get("titel") or "").strip():
-        return "kein Titel"
+    unusable = unusable_reason(entry)
+    if unusable:
+        return unusable
     if (entry.get("komplett") or "").strip().lower() == "ja":
         return "Komplett"
     status = (entry.get("voe_1") or "").strip().lower()
     if status in SKIP_VOE1_STATUS:
         return f"VÖ +1: {entry['voe_1'].strip()}"
+    return None
+
+
+def unusable_reason(entry: dict) -> Optional[str]:
+    """Grund, warum sich für diesen Eintrag gar nichts abfragen lässt (auch
+    nicht auf ausdrücklichen Wunsch), sonst None."""
+    if not (entry.get("titel") or "").strip():
+        return "kein Titel"
     if owned_volumes(entry) is None:
         return "Bände (bis) nicht lesbar"
     return None
@@ -482,6 +491,7 @@ def check_entries(
     progress: Optional[Callable[[int, int, str], None]] = None,
     cancel: Optional[threading.Event] = None,
     scope: str = SCOPE_ALL,
+    respect_skip: bool = True,
     fetch: Callable[[str], list[dict]] = fetch_products,
     sleep: Callable[[float], None] = time.sleep,
     delay: float = REQUEST_DELAY_SECONDS,
@@ -491,7 +501,9 @@ def check_entries(
     Fragt alle nicht übersprungenen Einträge nacheinander ab (mit Pause
     zwischen den Anfragen) und gibt (Ergebnisse, abgebrochen) zurück. `scope`
     (SCOPES) beschränkt die Abfrage nach VÖ +1; Einträge außerhalb der
-    Auswahl tauchen im Ergebnis nicht auf.
+    Auswahl tauchen im Ergebnis nicht auf. Mit `respect_skip=False` (einzelner,
+    ausdrücklich gewählter Titel) gilt die Überspringregel nicht, nur
+    unusable_reason().
     `progress(erledigt, gesamt, titel)` meldet den Fortschritt, `cancel`
     bricht nach dem laufenden Titel ab. Bei MAX_CONSECUTIVE_ERRORS Fehlern
     in Folge wird der Rest nicht mehr abgefragt.
@@ -501,7 +513,7 @@ def check_entries(
     for entry in entries:
         if not in_scope(entry, scope):
             continue
-        reason = skip_reason(entry)
+        reason = skip_reason(entry) if respect_skip else unusable_reason(entry)
         if reason:
             results.append(SeriesResult(entry.get("id"), entry.get("titel") or "", "uebersprungen", reason))
         else:

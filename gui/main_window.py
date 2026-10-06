@@ -1035,6 +1035,7 @@ class MangaLibraryApp(QMainWindow):
 
         menu = QMenu(self.view)
         menu.addAction("Bei buchhandel.de suchen", self.search_selected_on_buchhandel)
+        menu.addAction("Neue VÖ-Termine abfragen", self.lookup_selected_vlb)
         entry = self._find_entry(self._selected_id())
         if entry is not None and (entry.get("bestellt") or entry.get("angekommen")):
             menu.addAction("Bestellt-/Angekommen-Markierung entfernen", self.clear_ordered_mark)
@@ -1585,8 +1586,33 @@ class MangaLibraryApp(QMainWindow):
         dlg = VlbLookupDialog(self, counts, pause)
         if not dlg.exec():
             return
-        scope = dlg.scope
-        todo = counts[scope]
+        self._run_vlb_lookup(entries, dlg.scope, counts[dlg.scope])
+
+    def lookup_selected_vlb(self):
+        """Rechtsklick → "Neue VÖ-Termine abfragen": nur der markierte Titel.
+        Die Überspringregel gilt hier nicht - wer ausdrücklich einen Titel
+        wählt, bekommt auch eine Abfrage (z. B. bei "Komplett")."""
+        try:
+            import vlb_lookup
+        except ImportError:
+            QMessageBox.critical(
+                self, "VÖ-Termine",
+                "Das Paket „requests“ wird dafür benötigt.\n\nBitte installieren mit:\npip install requests",
+            )
+            return
+        entry = self._find_entry(self._selected_id())
+        if entry is None:
+            return
+        reason = vlb_lookup.unusable_reason(entry)
+        if reason:
+            QMessageBox.information(self, "VÖ-Termine", f"Für „{entry.get('titel', '')}“ nicht möglich: {reason}.")
+            return
+        self._run_vlb_lookup([copy.deepcopy(entry)], vlb_lookup.SCOPE_ALL, 1, single=True)
+
+    def _run_vlb_lookup(self, entries, scope, todo, single=False):
+        """Startet die Abfrage im Hintergrund (Fortschrittsfenster mit
+        "Abbrechen"); das Ergebnis landet in _finish_vlb_lookup."""
+        import vlb_lookup
 
         progress = QProgressDialog(f"Frage {todo} Serien ab ...", "Abbrechen", 0, 0, self)
         progress.setWindowTitle("VÖ-Termine werden abgefragt ...")
@@ -1600,13 +1626,15 @@ class MangaLibraryApp(QMainWindow):
         progress.show()
 
         def run():
-            return vlb_lookup.check_entries(entries, progress=call.progress.emit, cancel=cancel_event, scope=scope)
+            return vlb_lookup.check_entries(
+                entries, progress=call.progress.emit, cancel=cancel_event, scope=scope, respect_skip=not single
+            )
 
         call = AsyncCall(run, self)
         call.progress.connect(lambda done, total, titel: self._update_vlb_progress(
             progress, cancel_event, done, total, titel
         ))
-        call.finished.connect(lambda result, error: self._finish_vlb_lookup(progress, result, error))
+        call.finished.connect(lambda result, error: self._finish_vlb_lookup(progress, result, error, single))
         self._vlb_call = call
         call.start()
 
@@ -1624,7 +1652,22 @@ class MangaLibraryApp(QMainWindow):
         progress.setLabelText("Wird abgebrochen ...\nDie gerade laufende Abfrage wird noch fertig ausgewertet.")
         progress.setCancelButton(None)
 
-    def _finish_vlb_lookup(self, progress, result, error):
+    @staticmethod
+    def _single_vlb_message(r):
+        """Rückmeldung für einen einzelnen Titel (Rechtsklick)."""
+        found = ", ".join(f"Band {v.band}: {v.date.text()}" for v in r.volumes)
+        if r.status == "neu":
+            changes = ", ".join(f"{db.LABELS[c]} = {v}" for c, v in r.changes.items())
+            return f"{r.titel}\n\nNeu eingetragen: {changes}\n\nRot, bis gespeichert wird."
+        if r.status == "aktuell":
+            return (f"{r.titel}\n\nKeine Änderung: Die Termine stimmen schon, oder der vorhandene Wert "
+                    f"ist Freitext und bleibt unverändert.\n\nBei buchhandel.de gefunden: {found}.")
+        if r.status == "keine_neuen":
+            return f"{r.titel}\n\nKeine neuen Termine: {r.note or 'kein weiterer Band angekündigt'}."
+        text = f"{r.titel}\n\n{r.note or 'kein Ergebnis'}."
+        return text + (f"\n\nGefunden: {found}." if found else "")
+
+    def _finish_vlb_lookup(self, progress, result, error, single=False):
         import vlb_lookup
 
         progress.close()
@@ -1639,6 +1682,15 @@ class MangaLibraryApp(QMainWindow):
         for r in applied:
             changes = ", ".join(f"{db.LABELS[col]} = {value}" for col, value in r.changes.items())
             self._log(f"VÖ-Abgleich buchhandel.de: {r.titel}: {changes}")
+
+        if single and results:
+            r = results[0]
+            if r.status == "fehler":
+                QMessageBox.warning(self, "VÖ-Termine", f"{r.titel}\n\nAbfrage nicht möglich: {r.note}.")
+            else:
+                QMessageBox.information(self, "VÖ-Termine", self._single_vlb_message(r))
+            self.statusBar().showMessage(f"VÖ-Abgleich: {r.titel}", 8000)
+            return
 
         errors = [r for r in results if r.status == "fehler"]
         unclear = [r for r in results if r.status == "unklar"]
