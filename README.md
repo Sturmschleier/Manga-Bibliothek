@@ -33,6 +33,8 @@ Hinweise zu Quellcode, Tests und dem Bau der exe stehen in
 - **ISBN-Abgleich:** sucht die ISBN des nächsten Bandes bei der Deutschen
   Nationalbibliothek (DNB) und erstellt eine Bestellliste mit Links zum
   Buchhändler.
+- **VÖ-Termine:** holt die Erscheinungstermine neuer Bände von
+  buchhandel.de und trägt sie rot in VÖ +1 bis VÖ +3 ein.
 - **Sicher:** Änderungen werden erst beim Speichern übernommen, vor jedem
   Speichern entsteht eine Sicherung; optional zusätzlich in Google Drive.
 
@@ -349,6 +351,36 @@ DNB-Anfragen, der Zahl der Treffer, gefundenen Sonderausgaben und dem
 Ergebnis je Titel – hilfreich, wenn ein Band nicht gefunden wurde (z. B.
 weil die DNB den Titel anders schreibt). Der Pfad steht am Ende der
 Zusammenfassung. Es bleiben die neuesten 10 Log-Dateien (`isbn_log_keep`).
+
+### 6.4 VÖ-Termine von buchhandel.de
+
+Der Knopf **📅 VÖ-Termine holen** (auch unter Datei) fragt für alle Serien,
+bei denen neue Bände erscheinen können, die Terminliste von buchhandel.de ab
+und trägt Bände **nach dem letzten besessenen Band** in VÖ +1 bis VÖ +3 ein –
+Band „Bände (bis)“ + 1 nach VÖ +1, + 2 nach VÖ +2 usw. Eine Lücke (Band + 1
+noch nicht angekündigt, Band + 2 schon) bricht die Zuordnung ab, damit kein
+Termin in die falsche Spalte rutscht.
+
+- **Auswahl:** Vor dem Start wählst du, welche Serien abgefragt werden –
+  *Alle*, *nur mit Datum in VÖ +1*, *nur TBA* oder *nur NA* –, jeweils mit
+  Anzahl und geschätzter Dauer. So lässt sich die Abfrage verkürzen.
+- **Übersprungen** werden Einträge mit *Komplett* = Ja sowie VÖ +1 =
+  „Fortlaufend“, „Gestoppt“ oder „Beendet“. Die Spalte *Beendet* zählt nicht,
+  „NA“ und „TBA“ werden immer abgefragt.
+- **Neue Werte sind rot** und gelten erst nach **Speichern** (dann werden sie
+  schwarz). Bis dahin lässt sich alles mit „Rückgängig“ zurücknehmen; ein
+  von Hand geänderter Wert verliert die rote Farbe sofort.
+- **Datumsformate:** Das VLB liefert TT.MM.JJJJ, manchmal nur MM.JJJJ. Ein
+  ungenaues Datum bleibt ungenau und ersetzt nie ein genaueres. Freitext in
+  VÖ +1 bis VÖ +3 (z. B. „Band 17 11.06.2025“) wird nicht überschrieben.
+- **Zuordnung:** Es zählen nur Printausgaben passender Verlag, deren Titel auf
+  eine Bandnummer endet. Sonderausgaben, Boxen und andere Reihen mit ähnlichem
+  Titel werden ausgeschlossen. Lässt sich eine Reihe nicht eindeutig
+  zuordnen, steht sie im Ergebnis unter „Nicht eindeutig“ (Details-Knopf).
+- **Fair Use:** Pro Serie eine Anfrage, dazwischen 4 bis 6 Sekunden Pause, nur
+  auf Knopfdruck. Nach drei Fehlern in Folge (z. B. Seite nicht erreichbar)
+  wird der Abruf beendet. Die Schnittstelle von buchhandel.de ist nicht
+  offiziell dokumentiert und kann sich ohne Ankündigung ändern.
 
 ## 7. Daten und Sicherheit
 

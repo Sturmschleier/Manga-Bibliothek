@@ -19,6 +19,13 @@ EXCEEDS = "exceeds"
 # die Bandnummer, für die die Markierung gilt.
 MARK_FIELDS = ("bestellt", "angekommen")
 
+# Schlüssel im Eintrag (NICHT in database.STORED_COLUMNS, wird also nie
+# gespeichert): Liste der VÖ-Spalten, die der Abgleich mit buchhandel.de
+# (vlb_lookup) neu eingetragen hat. Die Tabelle zeigt sie rot, bis gespeichert
+# wird - beim Speichern wird der Bestand frisch aus der Datenbank geladen,
+# die Markierung entfällt dabei von selbst.
+NEW_VALUE_KEY = "_neu"
+
 # Auswahl des Bestellstatus-Filters in der Werkzeugleiste
 ORDER_FILTER_ALL = "Alle"
 ORDER_FILTER_OPTIONS = (ORDER_FILTER_ALL, "Bestellt", "Angekommen", "Bestellt oder angekommen", "Nicht bestellt")
@@ -72,6 +79,21 @@ def validate_entry(values: dict, other_titles=()) -> list[str]:
         if raw and _DATE_LIKE_RE.match(raw) and sorting.parse_date(raw) is None:
             problems.append(f"„{raw}“ ist kein gültiges Datum (TT.MM.JJJJ oder MM.JJJJ).")
     return problems
+
+
+def new_value_columns(entry: dict) -> tuple:
+    """Spalten dieses Eintrags, deren Wert vom Abgleich stammt und noch nicht
+    gespeichert ist (siehe NEW_VALUE_KEY)."""
+    return tuple(entry.get(NEW_VALUE_KEY) or ())
+
+
+def set_new_value_columns(entry: dict, columns) -> None:
+    """Setzt die Markierung neu; leer entfernt sie ganz."""
+    columns = list(dict.fromkeys(columns))
+    if columns:
+        entry[NEW_VALUE_KEY] = columns
+    elif NEW_VALUE_KEY in entry:
+        del entry[NEW_VALUE_KEY]
 
 
 def clear_fulfilled_marks(entry: dict) -> bool:
@@ -151,6 +173,9 @@ def increment_baende(entry: dict) -> Optional[int]:
             shifted[0] = "NA"
         for key, value in zip(VOE_COLUMNS, shifted):
             entry[key] = value
+        # Rote (noch nicht gespeicherte) Werte rücken mit ihrem Wert nach vorn
+        flagged = new_value_columns(entry)
+        set_new_value_columns(entry, [VOE_COLUMNS[i - 1] for i, key in enumerate(VOE_COLUMNS) if i and key in flagged])
 
     # Alte Datenbanken können noch eine "isbn"-Spalte in `werke` haben (heute
     # steht die ISBN in isbn_cache): sie gilt nur für den bisherigen Band.

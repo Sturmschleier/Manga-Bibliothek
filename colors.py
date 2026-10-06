@@ -33,6 +33,10 @@ ZEBRA_ODD = "#EDEDED"
 
 DEFAULT_TEXT_COLOR = "#1a1a1a"
 
+# Schriftfarbe für neu vom Abgleich mit buchhandel.de eingetragene, noch nicht
+# gespeicherte Termine (siehe logic.NEW_VALUE_KEY)
+NEW_VALUE_TEXT_COLOR = "#D00000"
+
 
 def voe1_color(value: str):
     """Liefert die Hintergrundfarbe für einen VÖ+1-Wert, falls dieser einem

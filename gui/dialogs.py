@@ -279,6 +279,84 @@ class IsbnLookupDialog(QDialog):
         self.accept()
 
 
+class VlbLookupDialog(QDialog):
+    """Auswahl für den Abgleich mit buchhandel.de: alle Serien oder nur die mit
+    einem Datum, "TBA" bzw. "NA" in VÖ +1 - so lässt sich die Abfrage
+    verkürzen. Zeigt je Auswahl die Zahl der Serien und die geschätzte Dauer.
+
+    `counts` ist {Auswahl: Anzahl} (vlb_lookup.count_by_scope), `pause` die
+    mittlere Wartezeit je Serie in Sekunden. `scope` enthält nach dem
+    Schließen mit "Abfrage starten" die gewählte Auswahl."""
+
+    OPTIONS = (
+        ("alle", "Alle Serien"),
+        ("datum", "Nur mit Datum in VÖ +1"),
+        ("tba", "Nur mit VÖ +1 = TBA"),
+        ("na", "Nur mit VÖ +1 = NA"),
+    )
+
+    def __init__(self, parent, counts, pause):
+        super().__init__(parent)
+        self.setWindowTitle("VÖ-Termine von buchhandel.de")
+        self.scope = None
+        self._counts = counts
+        self._pause = pause
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(
+            "Fragt bei buchhandel.de die Termine neuer Bände ab - eine Serie nach der anderen,\n"
+            "mit Pausen dazwischen. Neue Termine erscheinen rot in VÖ +1 bis VÖ +3 und gelten\n"
+            "erst nach „Speichern“ (vorher mit „Rückgängig“ zurücknehmbar)."
+        ))
+
+        self._radios = {}
+        for scope, label in self.OPTIONS:
+            radio = QRadioButton(f"{label}  ({counts.get(scope, 0)})")
+            radio.setEnabled(counts.get(scope, 0) > 0)
+            layout.addWidget(radio)
+            self._radios[scope] = radio
+        # Vorauswahl: die erste Auswahl, die etwas abfragt (normalerweise "Alle")
+        next(r for s, r in self._radios.items() if r.isEnabled() or s == "alle").setChecked(True)
+
+        skip_note = QLabel(
+            "Übersprungen werden: Komplett = Ja sowie VÖ +1 = Fortlaufend, Gestoppt oder Beendet."
+        )
+        skip_note.setStyleSheet("color: #666;")
+        layout.addWidget(skip_note)
+
+        self.estimate_label = QLabel()
+        layout.addWidget(self.estimate_label)
+
+        btn_row = QHBoxLayout()
+        self.start_btn = QPushButton("Abfrage starten")
+        self.start_btn.clicked.connect(self._submit)
+        cancel_btn = QPushButton("Abbrechen")
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addStretch(1)
+        btn_row.addWidget(self.start_btn)
+        btn_row.addWidget(cancel_btn)
+        layout.addLayout(btn_row)
+        for radio in self._radios.values():   # erst jetzt: _update_estimate braucht Knopf und Beschriftung
+            radio.toggled.connect(self._update_estimate)
+        self._update_estimate()
+
+    def _selected(self):
+        return next((scope for scope, radio in self._radios.items() if radio.isChecked()), None)
+
+    def _update_estimate(self):
+        scope = self._selected()
+        count = self._counts.get(scope, 0) if scope else 0
+        self.start_btn.setEnabled(count > 0)
+        minutes = max(1, round(count * self._pause / 60)) if count else 0
+        self.estimate_label.setText(
+            f"{count} Serien, Dauer etwa {minutes} Minute(n)." if count else "Keine Serie zur Abfrage vorhanden."
+        )
+
+    def _submit(self):
+        self.scope = self._selected()
+        self.accept()
+
+
 class AboutDialog(QDialog):
     """Hilfe → Über …: Version, Links zum Quellcode und zum Datenordner sowie
     die verwendeten Module mit Version, Zweck und Lizenz (siehe appinfo.py)."""

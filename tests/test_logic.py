@@ -189,3 +189,36 @@ def test_matches_order_filter(bestellt, angekommen, expected):
 def test_matches_order_filter_entry_without_mark_fields():
     assert logic.matches_order_filter({"titel": "X"}, "Nicht bestellt")
     assert not logic.matches_order_filter({"titel": "X"}, "Bestellt")
+
+
+# ------------------------------------------ rote (noch nicht gespeicherte) Werte
+
+def test_increment_baende_moves_new_value_flags_with_their_values():
+    entry = {"baende_bis": "5", "voe_1": "10.01.2027", "voe_2": "10.04.2027", "voe_3": "10.07.2027",
+             logic.NEW_VALUE_KEY: ["voe_2", "voe_3"]}
+    logic.increment_baende(entry)
+    assert (entry["voe_1"], entry["voe_2"], entry["voe_3"]) == ("10.04.2027", "10.07.2027", "")
+    assert entry[logic.NEW_VALUE_KEY] == ["voe_1", "voe_2"]
+
+
+def test_increment_baende_drops_flag_of_consumed_value():
+    entry = {"baende_bis": "5", "voe_1": "10.01.2027", "voe_2": "", "voe_3": "", logic.NEW_VALUE_KEY: ["voe_1"]}
+    logic.increment_baende(entry)
+    assert entry["voe_1"] == "NA"
+    assert logic.NEW_VALUE_KEY not in entry
+
+
+def test_increment_baende_keeps_flags_when_fortlaufend():
+    entry = {"baende_bis": "5", "voe_1": "Fortlaufend", "voe_2": "10.04.2027", "voe_3": "",
+             logic.NEW_VALUE_KEY: ["voe_2"]}
+    logic.increment_baende(entry)
+    assert entry[logic.NEW_VALUE_KEY] == ["voe_2"]
+
+
+def test_new_value_columns_helpers():
+    entry = {}
+    assert logic.new_value_columns(entry) == ()
+    logic.set_new_value_columns(entry, ["voe_1", "voe_1", "voe_3"])
+    assert logic.new_value_columns(entry) == ("voe_1", "voe_3")
+    logic.set_new_value_columns(entry, [])
+    assert logic.NEW_VALUE_KEY not in entry

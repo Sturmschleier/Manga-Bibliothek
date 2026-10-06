@@ -130,7 +130,10 @@ class LibraryBuffer:
         with self.change():
             entry = self.find(row_id)
             if entry is not None:
+                # von Hand geänderte Werte sind nicht mehr "vom Abgleich"
+                still_new = [c for c in logic.new_value_columns(entry) if values.get(c, entry.get(c)) == entry.get(c)]
                 entry.update(values)
+                logic.set_new_value_columns(entry, still_new)
                 logic.clear_fulfilled_marks(entry)
         return entry
 
@@ -184,6 +187,31 @@ class LibraryBuffer:
             for m in new:
                 m.entry[order_mail.FLAG_FIELD[m.item.kind]] = str(m.band)
         return new
+
+    def apply_vlb_dates(self, results) -> list:
+        """Trägt die Termine aus dem Abgleich mit buchhandel.de ein (siehe
+        vlb_lookup.SeriesResult: `entry_id`, `changes`, `previous`) und
+        markiert sie als neu (rot, bis gespeichert wird). Ein Feld, das sich
+        seit der Abfrage geändert hat, bleibt unangetastet. Alles zusammen
+        ist ein Rückgängig-Schritt. Gibt die Ergebnisse zurück, die etwas
+        geändert haben."""
+        applied = []
+        with self.change():
+            for result in results:
+                entry = self.find(result.entry_id)
+                if entry is None:
+                    continue
+                columns = [
+                    column for column, value in result.changes.items()
+                    if (entry.get(column) or "") == result.previous.get(column, "")
+                ]
+                if not columns:
+                    continue
+                for column in columns:
+                    entry[column] = result.changes[column]
+                logic.set_new_value_columns(entry, [*logic.new_value_columns(entry), *columns])
+                applied.append(result)
+        return applied
 
     def clear_marks(self, row_id) -> Optional[dict]:
         """Entfernt beide Markierungen eines Eintrags von Hand."""
