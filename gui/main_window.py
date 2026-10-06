@@ -74,7 +74,7 @@ from .constants import (
     _ruckstand_value,
     _voe1_category,
 )
-from .dialogs import AboutDialog, ConfigDialog, EntryDialog, IsbnLookupDialog
+from .dialogs import AboutDialog, ConfigDialog, EntryDialog, IsbnLookupDialog, VlbLookupDialog
 from .isbn_view import IsbnResultWindow
 from .mail_dialogs import MailSelectDialog, MailSettingsDialog
 from .table import CellDelegate, MangaTableModel
@@ -105,6 +105,7 @@ class MangaLibraryApp(QMainWindow):
         self._mail_call = None
         self._drive_call = None
         self._isbn_call = None
+        self._vlb_call = None
         self.setAcceptDrops(True)  # .eml-Dateien per Drag & Drop einlesen
 
         central = QWidget()
@@ -311,6 +312,13 @@ class MangaLibraryApp(QMainWindow):
         search_action.setToolTip("Den markierten Titel direkt auf buchhandel.de suchen (öffnet den Browser)")
         search_action.triggered.connect(self.search_selected_on_buchhandel)
 
+        vlb_action = file_menu.addAction("VÖ-Termine von buchhandel.de holen …")
+        vlb_action.setToolTip(
+            "Fragt bei buchhandel.de die Termine neuer Bände ab. Neue Werte erscheinen rot in VÖ +1 bis VÖ +3 "
+            "und werden erst mit Speichern übernommen."
+        )
+        vlb_action.triggered.connect(self.start_vlb_lookup)
+
         file_menu.addSeparator()
 
         import_action = file_menu.addAction("CSV importieren …")
@@ -438,6 +446,14 @@ class MangaLibraryApp(QMainWindow):
         isbn_btn = QPushButton("🔍 ISBN-Abgleich / Bestellliste")
         isbn_btn.clicked.connect(self.open_isbn_lookup_dialog)
         bar.addWidget(isbn_btn)
+
+        vlb_btn = QPushButton("📅 VÖ-Termine holen")
+        vlb_btn.setToolTip(
+            "Fragt bei buchhandel.de die Termine neuer Bände ab und trägt sie rot in VÖ +1 bis VÖ +3 ein "
+            "(gültig erst nach Speichern)"
+        )
+        vlb_btn.clicked.connect(self.start_vlb_lookup)
+        bar.addWidget(vlb_btn)
 
         bar.addWidget(self._vline())
         self._build_filter_bar(bar)
@@ -612,6 +628,12 @@ class MangaLibraryApp(QMainWindow):
         row.addSpacing(6)
         row.addWidget(self._bar_swatch(colors.ANGEKOMMEN_COLOR))
         row.addWidget(QLabel("angekommen"))
+
+        row.addSpacing(12)
+        new_value = QLabel("VÖ neu")
+        new_value.setStyleSheet(f"color: {colors.NEW_VALUE_TEXT_COLOR};")
+        new_value.setToolTip("Rote Schrift: von buchhandel.de eingetragen, noch nicht gespeichert")
+        row.addWidget(new_value)
 
         self.statusBar().addPermanentWidget(legend)
 
@@ -1013,6 +1035,7 @@ class MangaLibraryApp(QMainWindow):
 
         menu = QMenu(self.view)
         menu.addAction("Bei buchhandel.de suchen", self.search_selected_on_buchhandel)
+        menu.addAction("Neue VÖ-Termine abfragen", self.lookup_selected_vlb)
         entry = self._find_entry(self._selected_id())
         if entry is not None and (entry.get("bestellt") or entry.get("angekommen")):
             menu.addAction("Bestellt-/Angekommen-Markierung entfernen", self.clear_ordered_mark)
@@ -1538,3 +1561,162 @@ class MangaLibraryApp(QMainWindow):
 
         win = IsbnResultWindow(self, label, report, bestellliste)
         win.exec()
+
+
+    # ------------------------------------------- VÖ-Termine (buchhandel.de)
+
+    def start_vlb_lookup(self):
+        """Fragt bei buchhandel.de die Termine neuer Bände ab (siehe
+        vlb_lookup.py) und trägt sie rot in VÖ +1 bis VÖ +3 ein."""
+        try:
+            import vlb_lookup
+        except ImportError:
+            QMessageBox.critical(
+                self, "VÖ-Termine",
+                "Das Paket „requests“ wird dafür benötigt.\n\nBitte installieren mit:\npip install requests",
+            )
+            return
+
+        entries = copy.deepcopy(self.data)   # Abfrage im Hintergrund auf einer Kopie
+        counts = vlb_lookup.count_by_scope(entries)
+        if not counts[vlb_lookup.SCOPE_ALL]:
+            QMessageBox.information(self, "VÖ-Termine", "Es gibt keine Serie, für die abgefragt werden muss.")
+            return
+        pause = vlb_lookup.REQUEST_DELAY_SECONDS + vlb_lookup.REQUEST_DELAY_JITTER_SECONDS / 2
+        dlg = VlbLookupDialog(self, counts, pause)
+        if not dlg.exec():
+            return
+        self._run_vlb_lookup(entries, dlg.scope, counts[dlg.scope])
+
+    def lookup_selected_vlb(self):
+        """Rechtsklick → "Neue VÖ-Termine abfragen": nur der markierte Titel.
+        Die Überspringregel gilt hier nicht - wer ausdrücklich einen Titel
+        wählt, bekommt auch eine Abfrage (z. B. bei "Komplett")."""
+        try:
+            import vlb_lookup
+        except ImportError:
+            QMessageBox.critical(
+                self, "VÖ-Termine",
+                "Das Paket „requests“ wird dafür benötigt.\n\nBitte installieren mit:\npip install requests",
+            )
+            return
+        entry = self._find_entry(self._selected_id())
+        if entry is None:
+            return
+        reason = vlb_lookup.unusable_reason(entry)
+        if reason:
+            QMessageBox.information(self, "VÖ-Termine", f"Für „{entry.get('titel', '')}“ nicht möglich: {reason}.")
+            return
+        self._run_vlb_lookup([copy.deepcopy(entry)], vlb_lookup.SCOPE_ALL, 1, single=True)
+
+    def _run_vlb_lookup(self, entries, scope, todo, single=False):
+        """Startet die Abfrage im Hintergrund (Fortschrittsfenster mit
+        "Abbrechen"); das Ergebnis landet in _finish_vlb_lookup."""
+        import vlb_lookup
+
+        progress = QProgressDialog(f"Frage {todo} Serien ab ...", "Abbrechen", 0, 0, self)
+        progress.setWindowTitle("VÖ-Termine werden abgefragt ...")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setAutoReset(False)
+        progress.setAutoClose(False)
+        cancel_event = threading.Event()
+        progress.canceled.disconnect(progress.cancel)
+        progress.canceled.connect(lambda: self._cancel_vlb_lookup(progress, cancel_event))
+        progress.show()
+
+        def run():
+            return vlb_lookup.check_entries(
+                entries, progress=call.progress.emit, cancel=cancel_event, scope=scope, respect_skip=not single
+            )
+
+        call = AsyncCall(run, self)
+        call.progress.connect(lambda done, total, titel: self._update_vlb_progress(
+            progress, cancel_event, done, total, titel
+        ))
+        call.finished.connect(lambda result, error: self._finish_vlb_lookup(progress, result, error, single))
+        self._vlb_call = call
+        call.start()
+
+    @staticmethod
+    def _update_vlb_progress(progress, cancel_event, done, total, titel):
+        if cancel_event.is_set():
+            return  # Hinweis "wird abgebrochen" stehen lassen
+        progress.setMaximum(total)
+        progress.setValue(done)
+        progress.setLabelText(f"Serie {done + 1} von {total}:\n{titel}")
+
+    @staticmethod
+    def _cancel_vlb_lookup(progress, cancel_event):
+        cancel_event.set()
+        progress.setLabelText("Wird abgebrochen ...\nDie gerade laufende Abfrage wird noch fertig ausgewertet.")
+        progress.setCancelButton(None)
+
+    @staticmethod
+    def _single_vlb_message(r):
+        """Rückmeldung für einen einzelnen Titel (Rechtsklick)."""
+        found = ", ".join(f"Band {v.band}: {v.date.text()}" for v in r.volumes)
+        if r.status == "neu":
+            changes = ", ".join(f"{db.LABELS[c]} = {v}" for c, v in r.changes.items())
+            return f"{r.titel}\n\nNeu eingetragen: {changes}\n\nRot, bis gespeichert wird."
+        if r.status == "aktuell":
+            return (f"{r.titel}\n\nKeine Änderung: Die Termine stimmen schon, oder der vorhandene Wert "
+                    f"ist Freitext und bleibt unverändert.\n\nBei buchhandel.de gefunden: {found}.")
+        if r.status == "keine_neuen":
+            return f"{r.titel}\n\nKeine neuen Termine: {r.note or 'kein weiterer Band angekündigt'}."
+        text = f"{r.titel}\n\n{r.note or 'kein Ergebnis'}."
+        return text + (f"\n\nGefunden: {found}." if found else "")
+
+    def _finish_vlb_lookup(self, progress, result, error, single=False):
+        import vlb_lookup
+
+        progress.close()
+        self._vlb_call = None
+        if error is not None:
+            QMessageBox.critical(self, "VÖ-Termine", f"Fehler bei der Abfrage:\n\n{error}")
+            return
+        results, cancelled = result
+        applied = self.buffer.apply_vlb_dates(results)
+        if applied:
+            self._after_change()
+        for r in applied:
+            changes = ", ".join(f"{db.LABELS[col]} = {value}" for col, value in r.changes.items())
+            self._log(f"VÖ-Abgleich buchhandel.de: {r.titel}: {changes}")
+
+        if single and results:
+            r = results[0]
+            if r.status == "fehler":
+                QMessageBox.warning(self, "VÖ-Termine", f"{r.titel}\n\nAbfrage nicht möglich: {r.note}.")
+            else:
+                QMessageBox.information(self, "VÖ-Termine", self._single_vlb_message(r))
+            self.statusBar().showMessage(f"VÖ-Abgleich: {r.titel}", 8000)
+            return
+
+        errors = [r for r in results if r.status == "fehler"]
+        unclear = [r for r in results if r.status == "unklar"]
+        lines = [
+            f"{r.titel}: " + ", ".join(f"{db.LABELS[c]} {v}" for c, v in r.changes.items()) for r in applied
+        ]
+        details = []
+        if lines:
+            details += ["Neue Termine (rot, noch nicht gespeichert):", *lines, ""]
+        if unclear:
+            details += ["Nicht eindeutig zuzuordnen (bitte bei Bedarf von Hand prüfen):",
+                        *[f"{r.titel}: {r.note}" for r in unclear], ""]
+        if errors:
+            details += ["Fehler bei der Abfrage:", *[f"{r.titel}: {r.note}" for r in errors], ""]
+
+        asked = sum(1 for r in results if r.status != "uebersprungen")
+        text = f"{asked} Serien abgefragt, bei {len(applied)} neue Termine eingetragen."
+        if cancelled:
+            too_many_errors = len(errors) >= vlb_lookup.MAX_CONSECUTIVE_ERRORS
+            reason = " (mehrere Fehler in Folge)." if too_many_errors else "."
+            text += "\n\nDer Abruf wurde vorzeitig beendet" + reason
+        if applied:
+            text += "\n\nDie neuen Werte sind rot und werden mit „Speichern“ übernommen."
+        box = QMessageBox(QMessageBox.Warning if errors and cancelled else QMessageBox.Information,
+                          "VÖ-Termine", text, QMessageBox.Ok, self)
+        if details:
+            box.setDetailedText("\n".join(details))
+        box.exec()
+        self.statusBar().showMessage(f"VÖ-Abgleich: {len(applied)} Serien mit neuen Terminen", 8000)

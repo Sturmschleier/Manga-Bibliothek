@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QApplication, QStyle, QStyledItemDelegate
 
 import colors
 import config
+import logic
 
 from .constants import (
     BAR_COLOR_ROLE,
@@ -97,6 +98,8 @@ class MangaTableModel(QAbstractTableModel):
                 return QColor(colors.BESTELLT_COLOR)
             return QColor(colors.cell_background(col, entry.get(col, "") or "", index.row(), self.colors_enabled))
         if role == Qt.ForegroundRole:
+            if col in logic.new_value_columns(entry):
+                return QColor(colors.NEW_VALUE_TEXT_COLOR)
             return QColor(colors.DEFAULT_TEXT_COLOR)
         if role == BAR_COLOR_ROLE:
             if col == "titel" and entry.get("angekommen") and self.colors_enabled.get("angekommen", True):

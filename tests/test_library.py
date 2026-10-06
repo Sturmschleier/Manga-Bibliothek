@@ -162,3 +162,53 @@ def test_titles_except_ignores_own_entry():
     b = _buffer()
     assert b.titles_except(1) == {"blue lock"}
     assert b.titles_except() == {"sanda", "blue lock"}
+
+
+# ------------------------------------------------ VÖ-Abgleich (rote Werte)
+
+class _Result:
+    def __init__(self, entry_id, changes, previous):
+        self.entry_id, self.changes, self.previous = entry_id, changes, previous
+
+
+def test_apply_vlb_dates_writes_flags_and_is_one_undo_step():
+    buf = _buffer()
+    results = [
+        _Result(1, {"voe_2": "13.01.2027"}, {"voe_2": ""}),
+        _Result(2, {"voe_1": "05.03.2027"}, {"voe_1": "TBA"}),
+    ]
+    applied = buf.apply_vlb_dates(results)
+    assert len(applied) == 2
+    assert buf.find(1)["voe_2"] == "13.01.2027" and logic.new_value_columns(buf.find(1)) == ("voe_2",)
+    assert buf.find(2)["voe_1"] == "05.03.2027" and logic.new_value_columns(buf.find(2)) == ("voe_1",)
+    assert buf.dirty and len(buf.undo_stack) == 1
+    buf.undo()
+    assert not buf.dirty and buf.find(2)["voe_1"] == "TBA" and logic.NEW_VALUE_KEY not in buf.find(2)
+
+
+def test_apply_vlb_dates_skips_fields_changed_in_the_meantime():
+    buf = _buffer()
+    buf.find(1)["voe_2"] = "von Hand"
+    applied = buf.apply_vlb_dates([_Result(1, {"voe_2": "13.01.2027"}, {"voe_2": ""})])
+    assert applied == [] and buf.find(1)["voe_2"] == "von Hand"
+    assert not buf.can_undo or buf.undo_stack == []   # nichts geändert -> kein Rückgängig-Schritt
+
+
+def test_apply_vlb_dates_ignores_unknown_entries():
+    buf = _buffer()
+    assert buf.apply_vlb_dates([_Result(99, {"voe_1": "01.01.2027"}, {"voe_1": ""})]) == []
+
+
+def test_manual_edit_removes_flag_but_other_edits_keep_it():
+    buf = _buffer()
+    buf.apply_vlb_dates([_Result(1, {"voe_2": "13.01.2027", "voe_3": "13.04.2027"}, {"voe_2": "", "voe_3": ""})])
+    buf.update(1, {"kommentar": "x", "voe_2": "13.01.2027", "voe_3": "20.04.2027"})   # voe_3 von Hand geändert
+    assert logic.new_value_columns(buf.find(1)) == ("voe_2",)
+
+
+def test_saving_clears_flags():
+    buf = _buffer()
+    buf.apply_vlb_dates([_Result(1, {"voe_2": "13.01.2027"}, {"voe_2": ""})])
+    saved = [{k: v for k, v in e.items() if k != logic.NEW_VALUE_KEY} for e in buf.data]   # wie db.load_all()
+    buf.mark_saved(saved)
+    assert not buf.dirty and logic.new_value_columns(buf.find(1)) == ()

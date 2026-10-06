@@ -34,6 +34,7 @@ Programms stehen in der [README](README.md).
 ├── colors.py           Farbcodierung (VÖ +1, Komplett/Beendet, Verlag, Zebra)
 ├── sorting.py          Datums- und zahlenbewusste Sortierschlüssel
 ├── isbn_lookup.py      ISBN-Abgleich (DNB-SRU) und Bestellliste, Sonderausgaben
+├── vlb_lookup.py       VÖ-Termine von buchhandel.de (JSON-Schnittstelle), Vorschläge für VÖ +1 bis +3
 ├── shops.py            Buchhändler-Links für die Bestellliste
 ├── order_mail.py       Bestell-Mails (.eml) lesen, Artikel den Einträgen zuordnen
 ├── mail_fetch.py       IMAP-Abruf von Bestellbestätigungen (anbieterunabhängig)
