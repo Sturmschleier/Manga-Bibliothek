@@ -170,10 +170,9 @@ Start warnen.
 
 **Voraussetzungen der SignPath Foundation** (vor dem Antrag erledigen):
 
-- [ ] **Open-Source-Lizenz:** Im Repository fehlt noch eine `LICENSE`-Datei. Die
-      Foundation verlangt eine von der OSI anerkannte Lizenz (z. B. MIT oder
-      GPL-3.0). Die Wahl trifft der Autor; PySide6 steht unter LGPL, das ist
-      beim Mitliefern in der exe zu beachten.
+- [x] **Open-Source-Lizenz:** `LICENSE` (MIT, © 2026 Sturmschleier) – von der OSI
+      anerkannt. PySide6 steht unter LGPL; die Bibliotheken führt der
+      Über-Dialog mit ihren Lizenzen auf.
 - [x] Öffentliches Repository, Build auf GitHub-Servern (`release.yml`),
       reproduzierbare feste Versionen (`requirements-build.txt`)
 - [ ] Code-Signing-Richtlinie veröffentlichen: Entwurf in

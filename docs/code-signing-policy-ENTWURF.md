@@ -19,8 +19,8 @@ nichts signiert, was nicht aus diesem Quellcode stammt.
 
 | Rolle | Person |
 |---|---|
-| Committer und Reviewer | <GitHub-Name, z. B. Sturmschleier> |
-| Freigabe (Approver) der Signaturanfragen | <GitHub-Name> |
+| Committer und Reviewer | Sturmschleier |
+| Freigabe (Approver) der Signaturanfragen | Sturmschleier |
 
 ## Datenschutz
 

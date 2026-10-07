@@ -530,3 +530,11 @@ Protokollen direkt im Explorer.
 - **„config.json ist beschädigt“** – siehe [Kapitel 8](#8-konfiguration).
 - **Unerwarteter Fehler** – die Meldung nennt `LOG/fehler.log`; die Datei
   enthält die Details für eine Fehlersuche.
+
+## Lizenz
+
+Der Quellcode steht unter der [MIT-Lizenz](LICENSE) (© 2026 Sturmschleier).
+Die verwendeten Bibliotheken behalten ihre eigenen Lizenzen – Version, Zweck
+und Lizenz jeder einzelnen zeigt **Hilfe → Über …**. PySide6/Qt steht unter der
+LGPL-3.0; die exe lässt sich mit `build.bat` bzw. dem Release-Workflow aus dem
+offenen Quellcode jederzeit mit einer anderen PySide6-Version neu bauen.
