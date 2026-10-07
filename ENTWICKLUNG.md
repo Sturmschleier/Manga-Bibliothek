@@ -97,6 +97,13 @@ Die exe muss auf **Windows** gebaut werden. Dazu `build.bat` per
 Doppelklick oder in der Eingabeaufforderung starten; das Ergebnis liegt
 danach in `dist\MangaLibrary.exe`.
 
+**Voraussetzung:** Python 3.9 oder neuer (getestet mit 3.14), installiert von
+python.org mit angehaktem „Add python.exe to PATH“ – oder über die Python-
+Verwaltung aus dem Microsoft Store. Die vorinstallierte Store-Verknüpfung
+`python` allein reicht nicht; fehlt Python, sagt `build.bat` das mit einer
+Anleitung. Zum bloßen Starten der fertigen exe aus dem Release ist kein
+Python nötig.
+
 - **Eigene Umgebung, feste Versionen:** `build.bat` baut in `.venv-build`
   mit den exakt festgelegten Versionen aus `requirements-build.txt` –
   unabhängig davon, was im globalen Python installiert ist. Beim ersten Mal
