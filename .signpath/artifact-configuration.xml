@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Artefakt-Konfiguration für SignPath (Signieren von MangaLibrary.exe).
+  Der Workflow .github/workflows/release.yml lädt die exe als GitHub-Artefakt
+  hoch (ein ZIP mit genau dieser Datei); SignPath signiert sie per Authenticode.
+  Diese Datei wird bei SignPath als Artefakt-Konfiguration hinterlegt
+  (Slug: "initial") - siehe ENTWICKLUNG.md, Abschnitt "Signieren".
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="MangaLibrary.exe">
+      <authenticode-sign/>
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

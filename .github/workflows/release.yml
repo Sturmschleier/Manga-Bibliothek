@@ -1,0 +1,187 @@
+# Release: baut MangaLibrary.exe auf einem frischen GitHub-Rechner (Windows) mit
+# den festen Versionen aus requirements-build.txt - ohne dass auf einem eigenen
+# Rechner Python oder sonst etwas installiert sein muss.
+#
+# Starten:
+#   - Neue Version:  VERSION in appinfo.py per Pull Request anheben und mergen,
+#     dann den Tag setzen:   git tag v1.0.5 && git push origin v1.0.5
+#     Der Workflow baut die exe und legt das Release v1.0.5 mit exe und
+#     Prüfsumme an (Release-Text danach auf GitHub nach Wunsch ergänzen).
+#   - Nur ausprobieren:  Reiter "Actions" -> "Release" -> "Run workflow". Das legt
+#     KEIN Release an; die exe steht als Download am Durchlauf (Artefakt).
+#
+# Jede gebaute exe bekommt einen Herkunftsnachweis von GitHub (Attestation):
+#   gh attestation verify MangaLibrary.exe --repo Sturmschleier/Manga-Bibliothek
+#
+# Signatur (SignPath Foundation): der Job "sign" ist vorbereitet, läuft aber nur,
+# wenn die Repository-Variable SIGNPATH_ORGANIZATION_ID gesetzt ist. Einrichtung
+# siehe ENTWICKLUNG.md, Abschnitt "Signieren (SignPath Foundation)".
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:   # von Hand startbar, ohne Release
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false   # ein laufender Release-Build wird nie abgebrochen
+
+jobs:
+  build:
+    name: exe bauen
+    runs-on: windows-latest
+    timeout-minutes: 30
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - name: Code auschecken
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # für die Prüfung, ob der Tag auf main liegt
+
+      - name: Python einrichten
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Tag prüfen (Version und Branch)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          version="$(python -c 'import appinfo; print(appinfo.VERSION)')"
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::Der Tag ${GITHUB_REF_NAME} passt nicht zu VERSION=${version} in appinfo.py"
+            exit 1
+          fi
+          git fetch --quiet origin main
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "::error::Der Tag ${GITHUB_REF_NAME} liegt nicht auf main - Releases nur aus main"
+            exit 1
+          fi
+
+      - name: exe bauen (build.bat)
+        shell: cmd
+        run: build.bat --no-pause
+
+      - name: Ergebnis prüfen
+        shell: pwsh
+        run: |
+          $exe = Get-Item dist\MangaLibrary.exe
+          if ($exe.Length -lt 20MB) { throw "MangaLibrary.exe ist nur $($exe.Length) Bytes groß - der Build ist unvollständig" }
+          "MangaLibrary.exe: $($exe.Length) Bytes"
+
+      - name: exe als Artefakt hochladen (unsigniert)
+        id: upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: exe-unsigned
+          path: dist/MangaLibrary.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  sign:
+    name: exe signieren (SignPath)
+    needs: build
+    # nur, wenn SignPath eingerichtet ist (Variable unter Settings -> Secrets and variables -> Actions -> Variables)
+    if: ${{ vars.SIGNPATH_ORGANIZATION_ID != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read   # SignPath liest das Artefakt dieses Durchlaufs
+    steps:
+      - name: Signatur bei SignPath anfordern
+        uses: signpath/github-action-submit-signing-request@v2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'Manga-Bibliothek' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG || 'initial' }}
+          github-artifact-id: ${{ needs.build.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+
+      - name: Signierte exe als Artefakt hochladen
+        uses: actions/upload-artifact@v7
+        with:
+          name: exe-signed
+          path: signed/MangaLibrary.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  finalize:
+    name: Prüfsumme, Herkunftsnachweis, Release
+    needs: [build, sign]
+    # weiter, wenn der Build gelang und das Signieren entweder klappte oder gar nicht eingerichtet ist
+    if: ${{ !cancelled() && needs.build.result == 'success' && (needs.sign.result == 'success' || needs.sign.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write       # Release anlegen
+      id-token: write       # Herkunftsnachweis (Attestation)
+      attestations: write
+    steps:
+      - name: Fertige exe laden
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.sign.result == 'success' && 'exe-signed' || 'exe-unsigned' }}
+          path: final
+
+      - name: Prüfsumme berechnen
+        working-directory: final
+        run: |
+          sha256sum MangaLibrary.exe | sed 's/ \*/  /' > MangaLibrary.exe.sha256
+          cat MangaLibrary.exe.sha256
+          {
+            echo "### MangaLibrary.exe"
+            echo
+            echo "- Signiert (SignPath): ${{ needs.sign.result == 'success' && 'ja' || 'nein' }}"
+            echo "- SHA-256: \`$(cut -d' ' -f1 MangaLibrary.exe.sha256)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Herkunftsnachweis erstellen
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: final/MangaLibrary.exe
+
+      - name: exe und Prüfsumme als Artefakt bereitstellen
+        uses: actions/upload-artifact@v7
+        with:
+          name: MangaLibrary
+          path: |
+            final/MangaLibrary.exe
+            final/MangaLibrary.exe.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Release anlegen oder ergänzen
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGNED: ${{ needs.sign.result == 'success' && 'signiert' || 'nicht signiert' }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            # Release (z. B. mit von Hand geschriebenem Text) existiert schon: nur die Dateien ersetzen
+            gh release upload "${tag}" final/MangaLibrary.exe final/MangaLibrary.exe.sha256 --clobber --repo "${GITHUB_REPOSITORY}"
+          else
+            cat > notes.md <<EOF
+          Gebaut von GitHub Actions aus dem Tag \`${tag}\` (${SIGNED}).
+
+          ## Hinweise
+          - **Aktualisieren:** Programm beenden und \`MangaLibrary.exe\` im Ordner durch die neue Version ersetzen - die Daten bleiben erhalten.
+          - Die exe legt \`manga_library.db\`, \`config.json\`, \`LOG/\` und \`BACKUP/\` **neben sich** ab - bitte aus einem eigenen Ordner starten.
+          - **Prüfen:** SHA-256 steht in \`MangaLibrary.exe.sha256\`; die Herkunft lässt sich mit \`gh attestation verify MangaLibrary.exe --repo ${GITHUB_REPOSITORY}\` bestätigen.
+          - Ist die exe nicht signiert, kann Windows SmartScreen beim ersten Start warnen (Weitere Informationen -> Trotzdem ausführen).
+
+          ## Änderungen
+          EOF
+            gh release create "${tag}" final/MangaLibrary.exe final/MangaLibrary.exe.sha256 \
+              --repo "${GITHUB_REPOSITORY}" --title "Manga & Light Novel Bibliothek ${tag}" \
+              --notes-file notes.md --generate-notes --verify-tag
+          fi

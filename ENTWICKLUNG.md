@@ -9,7 +9,8 @@ Programms stehen in der [README](README.md).
 2. [Tests, Linter und CI](#2-tests-linter-und-ci)
 3. [exe bauen](#3-exe-bauen)
 4. [Neue Version veröffentlichen](#4-neue-version-veröffentlichen)
-5. [Datenmodell](#5-datenmodell)
+5. [Signieren (SignPath Foundation)](#5-signieren-signpath-foundation)
+6. [Datenmodell](#6-datenmodell)
 
 ## 1. Projektstruktur
 
@@ -49,7 +50,9 @@ Programms stehen in der [README](README.md).
 ├── requirements-dev.txt  zusätzlich für die Entwicklung: pytest, Ruff
 ├── requirements-build.txt  exakte Versionen für den exe-Build
 ├── pyproject.toml      Konfiguration des Linters Ruff
-└── .github/workflows/  automatische Prüfungen auf GitHub (CI)
+├── .github/workflows/  tests.yml (Prüfungen, CI) und release.yml (baut die exe, legt das Release an)
+├── .signpath/          Artefakt-Konfiguration für die Code-Signatur (SignPath)
+└── docs/               Screenshots der README, Entwurf der Code-Signing-Richtlinie
 ```
 
 Details zur DNB-Suche (Suchanfrage, Bandfelder, Erkennung von
@@ -126,18 +129,79 @@ Details in `LOG\fehler.log` neben der exe.
 ## 4. Neue Version veröffentlichen
 
 Die Versionsnummer steht an genau einer Stelle: `VERSION` in `appinfo.py`
-(angezeigt unter „Hilfe → Über …“).
+(angezeigt unter „Hilfe → Über …“). Die exe baut **GitHub** (Workflow
+`.github/workflows/release.yml`) – dafür muss auf keinem eigenen Rechner Python
+installiert sein.
 
-1. `VERSION` anheben (z. B. `1.0.3` → `1.0.4`) und per Pull Request mergen.
-2. Mit `build.bat` die exe aus dem aktuellen `main` bauen.
-3. Auf GitHub ein Release mit dem Tag `v<VERSION>` (z. B. `v1.0.4`) anlegen
-   und `dist\MangaLibrary.exe` anhängen.
+1. `VERSION` anheben (z. B. `1.0.4` → `1.0.5`) und per Pull Request mergen.
+2. Den Tag auf `main` setzen und hochladen:
+
+   ```
+   git switch main && git pull
+   git tag v1.0.5
+   git push origin v1.0.5
+   ```
+
+3. Der Workflow baut die exe, erstellt Prüfsumme (`MangaLibrary.exe.sha256`)
+   und Herkunftsnachweis und legt das Release `v1.0.5` mit beiden Dateien an
+   (Text aus den Änderungen automatisch; danach auf GitHub nach Wunsch
+   ergänzen – bei einem schon vorhandenen Release werden nur die Dateien
+   ersetzt). Der Tag muss zu `VERSION` passen und auf `main` liegen, sonst
+   bricht der Workflow ab.
+
+Zum Ausprobieren ohne Release: Reiter **Actions → Release → Run workflow**. Die
+exe steht dann als Artefakt „MangaLibrary“ am Durchlauf zum Herunterladen.
+
+**Herkunft prüfen:** `gh attestation verify MangaLibrary.exe --repo Sturmschleier/Manga-Bibliothek`
+bestätigt, dass die exe aus diesem Repository und Commit gebaut wurde.
+Lokal bauen geht weiterhin mit `build.bat` (siehe Abschnitt 3).
 
 Neue Bibliotheken bei Bedarf in `appinfo.LIBRARIES` eintragen – dann
 erscheinen sie im Über-Dialog, und `MangaLibrary.spec` packt ihre
 Versionsangaben automatisch mit in die exe.
 
-## 5. Datenmodell
+## 5. Signieren (SignPath Foundation)
+
+Der Workflow ist für die kostenlose Code-Signatur der
+[SignPath Foundation](https://signpath.org/) vorbereitet, signiert aber erst,
+wenn SignPath eingerichtet ist. Bis dahin entsteht eine unsignierte exe (mit
+Prüfsumme und Herkunftsnachweis); Windows SmartScreen kann dann beim ersten
+Start warnen.
+
+**Voraussetzungen der SignPath Foundation** (vor dem Antrag erledigen):
+
+- [ ] **Open-Source-Lizenz:** Im Repository fehlt noch eine `LICENSE`-Datei. Die
+      Foundation verlangt eine von der OSI anerkannte Lizenz (z. B. MIT oder
+      GPL-3.0). Die Wahl trifft der Autor; PySide6 steht unter LGPL, das ist
+      beim Mitliefern in der exe zu beachten.
+- [x] Öffentliches Repository, Build auf GitHub-Servern (`release.yml`),
+      reproduzierbare feste Versionen (`requirements-build.txt`)
+- [ ] Code-Signing-Richtlinie veröffentlichen: Entwurf in
+      `docs/code-signing-policy-ENTWURF.md` (Rollen eintragen, in
+      `code-signing-policy.md` umbenennen, in der README verlinken – erst nach
+      der Zusage)
+- [ ] Antrag stellen auf <https://signpath.org/apply> (Projektbeschreibung, Link
+      zum Repository, Lizenz, Release-Verfahren)
+
+**Nach der Zusage** bei SignPath: Projekt mit dem Slug `Manga-Bibliothek` anlegen,
+die Datei `.signpath/artifact-configuration.xml` als Artefakt-Konfiguration
+(Slug `initial`) einfügen, die GitHub-Anbindung („Trusted Build System“) mit
+diesem Repository herstellen und eine Signing-Policy `release-signing` anlegen
+(Freigabe durch den Autor). Dann auf GitHub unter *Settings → Secrets and
+variables → Actions* eintragen:
+
+| Art | Name | Wert |
+|---|---|---|
+| Variable | `SIGNPATH_ORGANIZATION_ID` | Organisations-ID bei SignPath (schaltet das Signieren ein) |
+| Secret | `SIGNPATH_API_TOKEN` | API-Token des SignPath-Benutzers |
+| Variable (optional) | `SIGNPATH_PROJECT_SLUG` | Standard `Manga-Bibliothek` |
+| Variable (optional) | `SIGNPATH_SIGNING_POLICY_SLUG` | Standard `release-signing` |
+| Variable (optional) | `SIGNPATH_ARTIFACT_CONFIGURATION_SLUG` | Standard `initial` |
+
+Ab dann läuft beim nächsten Tag der Job „exe signieren“ automatisch; das
+Release enthält die signierte exe, die Prüfsumme gilt für die signierte Datei.
+
+## 6. Datenmodell
 
 Die Spalten eines Eintrags sind in `database.COLUMNS` festgelegt, dazu die
 unsichtbaren Felder `bestellt` und `angekommen` (`HIDDEN_COLUMNS`, Wert =
