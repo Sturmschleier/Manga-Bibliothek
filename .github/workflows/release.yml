@@ -4,8 +4,8 @@
 #
 # Starten:
 #   - Neue Version:  VERSION in appinfo.py per Pull Request anheben und mergen,
-#     dann den Tag setzen:   git tag v1.0.5 && git push origin v1.0.5
-#     Der Workflow baut die exe und legt das Release v1.0.5 mit exe und
+#     dann den Tag setzen:   git tag v1.0.6 && git push origin v1.0.6
+#     Der Workflow baut die exe und legt das Release v1.0.6 mit exe und
 #     Prüfsumme an (Release-Text danach auf GitHub nach Wunsch ergänzen).
 #   - Nur ausprobieren:  Reiter "Actions" -> "Release" -> "Run workflow". Das legt
 #     KEIN Release an; die exe steht als Download am Durchlauf (Artefakt).

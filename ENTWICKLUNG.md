@@ -133,17 +133,17 @@ Die Versionsnummer steht an genau einer Stelle: `VERSION` in `appinfo.py`
 `.github/workflows/release.yml`) – dafür muss auf keinem eigenen Rechner Python
 installiert sein.
 
-1. `VERSION` anheben (z. B. `1.0.4` → `1.0.5`) und per Pull Request mergen.
+1. `VERSION` anheben (z. B. `1.0.5` → `1.0.6`) und per Pull Request mergen.
 2. Den Tag auf `main` setzen und hochladen:
 
    ```
    git switch main && git pull
-   git tag v1.0.5
-   git push origin v1.0.5
+   git tag v1.0.6
+   git push origin v1.0.6
    ```
 
 3. Der Workflow baut die exe, erstellt Prüfsumme (`MangaLibrary.exe.sha256`)
-   und Herkunftsnachweis und legt das Release `v1.0.5` mit beiden Dateien an
+   und Herkunftsnachweis und legt das Release `v1.0.6` mit beiden Dateien an
    (Text aus den Änderungen automatisch; danach auf GitHub nach Wunsch
    ergänzen – bei einem schon vorhandenen Release werden nur die Dateien
    ersetzt). Der Tag muss zu `VERSION` passen und auf `main` liegen, sonst
